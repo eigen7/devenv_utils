@@ -13,7 +13,7 @@ from pathlib import Path
 from .config import DevenvConfig
 from .console import SetupException, print_green, print_red, print_rule, yes_no
 from .docker_ops import build_image
-from .nvidia import validate_nvidia_driver, validate_nvidia_installation
+from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
 from .vscode_attach import (
     vscode_attach_config_paths,
@@ -135,6 +135,9 @@ class SetupWizardTool:
 
     def validate_nvidia_installation(self, image: str | None = None):
         validate_nvidia_installation(image or self.config.image)
+
+    def setup_cdi(self):
+        setup_cdi()
 
     # ---- Convenience ----------------------------------------------------
 

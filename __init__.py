@@ -17,9 +17,11 @@ from .console import (
 )
 from .docker_ops import (
     build_image,
+    cdi_spec_exists,
     check_image_version,
     exec_into_running,
     get_image_label,
+    gpu_docker_args,
     image_exists,
     is_container_running,
     is_version_ok,
@@ -27,7 +29,7 @@ from .docker_ops import (
     run_container,
 )
 from .download import download, have
-from .nvidia import validate_nvidia_driver, validate_nvidia_installation
+from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import (
     get_env_json,
     in_docker_container,
@@ -52,9 +54,11 @@ __all__ = [
     "print_rule",
     "yes_no",
     "build_image",
+    "cdi_spec_exists",
     "check_image_version",
     "exec_into_running",
     "get_image_label",
+    "gpu_docker_args",
     "image_exists",
     "is_container_running",
     "is_version_ok",
@@ -62,6 +66,7 @@ __all__ = [
     "run_container",
     "download",
     "have",
+    "setup_cdi",
     "validate_nvidia_driver",
     "validate_nvidia_installation",
     "get_env_json",
