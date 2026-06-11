@@ -6,6 +6,34 @@
 # /workspace/repo), which the container launcher passes through at run time.
 set -e
 
+# SSH: a container-local keypair (self-authorized, lax known-hosts) so that
+# tools that ssh to localhost/other containers Just Work.
+if command -v ssh-keygen >/dev/null && ! [ -f ~/.ssh/id_ed25519 ]; then
+  mkdir -p ~/.ssh
+  chmod 700 ~/.ssh
+  ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+  printf 'Host *\n    StrictHostKeyChecking accept-new\n    UserKnownHostsFile ~/.ssh/known_hosts\n' > ~/.ssh/config
+  cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/config ~/.ssh/authorized_keys
+fi
+
+# .sqliterc
+if ! [ -f ~/.sqliterc ]; then
+  cat << 'EOF' > ~/.sqliterc
+.mode column
+.headers on
+EOF
+fi
+
+# Symlinks to the host-convenience bind mounts (see run_docker's
+# _convenience_mounts): Claude Code state and the host .gitconfig.
+if [ -e /workspace/.claude_history ]; then
+  ln -snf /workspace/.claude_history ~/.claude
+fi
+if [ -e /workspace/.gitconfig_host ]; then
+  ln -snf /workspace/.gitconfig_host ~/.gitconfig
+fi
+
 # .vimrc
 if ! [ -f ~/.vimrc ]; then
   cat << 'EOF' > ~/.vimrc

@@ -7,6 +7,7 @@ lets each project keep a minimal Dockerfile that `COPY`s the shared scripts
 without those scripts having to physically live in the project tree.
 """
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -127,18 +128,64 @@ def is_container_running(name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
 
+def _run_with_tmux_rename(cmd: list) -> None:
+    """Run a long-lived interactive command, temporarily renaming the tmux
+    window to "docker" (if we're inside tmux) so it's easy to spot."""
+    old_name = None
+    if "TMUX" in os.environ:
+        old_name = subprocess.check_output(
+            ["tmux", "display-message", "-p", "#W"], text=True
+        ).strip()
+        subprocess.run(["tmux", "rename-window", "docker"], check=False)
+    try:
+        print(f"$ {' '.join(cmd)}")
+        subprocess.run(cmd, check=False)
+    finally:
+        if old_name is not None:
+            subprocess.run(["tmux", "rename-window", old_name], check=False)
+
+
 def exec_into_running(name: str, remote_user: str) -> None:
     cmd = ["docker", "exec", "-it", name, "gosu", remote_user, "bash"]
-    print(f"$ {' '.join(cmd)}")
-    subprocess.run(cmd, check=False)
+    _run_with_tmux_rename(cmd)
 
 
-def run_container(config, *, image: str, instance_name: str, mount_dir: str) -> None:
+def _convenience_mounts() -> list:
+    """Bind-mounts for per-user conveniences shared across all projects.
+
+    These land at neutral paths under /workspace (outside /home, so they don't
+    interfere with the entrypoint's useradd); devuser-setup.sh symlinks them
+    into the dev user's home.
+      ~/.claude     -> /workspace/.claude_history   (Claude Code state)
+      ~/.gitconfig  -> /workspace/.gitconfig_host   (commits get name/email)
+    """
+    claude_dir = Path.home() / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    # touch() prevents Docker from pre-creating this as a root-owned
+    # directory if it's missing on the host.
+    gitconfig = Path.home() / ".gitconfig"
+    gitconfig.touch(exist_ok=True)
+    return [
+        "-v", f"{claude_dir}:/workspace/.claude_history",
+        "-v", f"{gitconfig}:/workspace/.gitconfig_host",
+    ]
+
+
+def run_container(
+    config,
+    *,
+    image: str,
+    instance_name: str,
+    mount_dir: Optional[str] = None,
+    extra_args: Optional[list] = None,
+) -> None:
     """`docker run` a fresh container for `config`, dropping into a shell.
 
-    Bind-mounts the repo and mount dir, forwards the configured ports, and
-    passes the host UID/GID plus the workspace path so the container's
-    entrypoint can reconcile ownership and the per-user setup can cd correctly.
+    Bind-mounts the repo (and the mount dir, if the project uses one),
+    forwards the configured ports, and passes the host UID/GID plus the
+    workspace path so the container's entrypoint can reconcile ownership and
+    the per-user setup can cd correctly. `extra_args` (from the project's
+    pre-launch hook) are appended after the config's static extra_docker_args.
     """
     uid = subprocess.check_output(["id", "-u"], text=True).strip()
     gid = subprocess.check_output(["id", "-g"], text=True).strip()
@@ -147,16 +194,24 @@ def run_container(config, *, image: str, instance_name: str, mount_dir: str) -> 
         "docker", "run", "--rm", "-it",
         "--gpus", "all",
         "--name", instance_name,
+        "--hostname", config.container_hostname,
         "-e", f"HOST_UID={uid}",
         "-e", f"HOST_GID={gid}",
         "-e", f"USERNAME={config.remote_user}",
         "-e", f"DEVENV_WORKSPACE={config.container_repo_path}",
         "-v", f"{config.repo_root}:{config.container_repo_path}",
-        "-v", f"{mount_dir}:{config.container_mount_path}",
     ]
-    for port in config.required_ports:
-        cmd += ["-p", f"{port}:{port}"]
+    if config.container_mount_path is not None:
+        assert mount_dir, "mount_dir required when config has a mount path"
+        cmd += ["-v", f"{mount_dir}:{config.container_mount_path}"]
+    cmd += _convenience_mounts()
+    cmd += config.extra_docker_args
+    if extra_args:
+        cmd += extra_args
+    # Port mappings are meaningless (and ignored) under --network=host.
+    if "--network=host" not in cmd:
+        for port in config.required_ports:
+            cmd += ["-p", f"{port}:{port}"]
     cmd += [image, "bash"]
 
-    print(f"$ {' '.join(cmd)}")
-    subprocess.run(cmd, check=False)
+    _run_with_tmux_rename(cmd)

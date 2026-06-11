@@ -21,15 +21,22 @@ class DevenvConfig:
     # Container name used by run_docker / the VS Code attach config.
     # Defaults to f"{name}_instance".
     instance_name: str = ""
+    # Hostname inside the container. Defaults to f"{name}-container".
+    container_hostname: str = ""
     # Suggested host mount dir during setup. Defaults to ~/<name>.
     default_mount_dir: Optional[Path] = None
 
     # Where the repo / mount dir are bind-mounted inside the container.
+    # Set container_mount_path to None for projects that don't need a
+    # persistent mount dir: the wizard's mount-dir step and run_docker's
+    # MOUNT_DIR requirement are then skipped entirely.
     container_repo_path: str = "/workspace/repo"
-    container_mount_path: str = "/workspace/mount"
+    container_mount_path: Optional[str] = "/workspace/mount"
 
     # Ports forwarded host -> container by run_docker.
     required_ports: list[int] = field(default_factory=list)
+    # Extra static args appended to every `docker run` (e.g. ["--ipc=host"]).
+    extra_docker_args: list[str] = field(default_factory=list)
     # Minimum acceptable value of the image's `version` label.
     min_image_version: str = "0.0.0"
     # Unprivileged user the container runs as / VS Code attaches as.
@@ -47,6 +54,8 @@ class DevenvConfig:
             self.image = self.name
         if not self.instance_name:
             self.instance_name = f"{self.name}_instance"
+        if not self.container_hostname:
+            self.container_hostname = f"{self.name}-container"
         if self.default_mount_dir is None:
             self.default_mount_dir = Path.home() / self.name
         self.default_mount_dir = Path(self.default_mount_dir)

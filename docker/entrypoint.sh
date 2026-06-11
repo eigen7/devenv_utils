@@ -30,8 +30,13 @@ if ! getent passwd "$USERNAME" >/dev/null 2>&1; then
   fi
 fi
 
-# Passwordless sudo for convenience inside the container.
-echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Passwordless sudo for convenience inside the container (sudoers.d so this
+# is idempotent across container restarts), plus hardware-access groups.
+mkdir -p /etc/sudoers.d
+echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME"
+chmod 0440 "/etc/sudoers.d/$USERNAME"
+if getent group sudo >/dev/null; then usermod -aG sudo "$USERNAME"; fi
+if getent group video >/dev/null; then usermod -aG video "$USERNAME"; fi
 
 mkdir -p /workspace
 chown "$USERNAME":"$USERNAME" /workspace

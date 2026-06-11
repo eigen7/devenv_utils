@@ -30,6 +30,8 @@ class SetupWizardTool:
 
     def setup_mount_dir(self) -> Path:
         c = self.config
+        assert c.container_mount_path is not None, \
+            f"{c.name} has no container_mount_path; skip the mount-dir step."
         print(f"{c.name} needs a persistent directory on the host that gets")
         print(f"bind-mounted into the Docker container at {c.container_mount_path}.")
         print("It holds data that must outlive any single container, and it MUST")

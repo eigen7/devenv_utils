@@ -9,6 +9,7 @@ the primitives in `docker_ops`.
 import argparse
 import os
 import sys
+from typing import Callable, Optional
 
 from .config import DevenvConfig
 from .console import SetupException
@@ -42,8 +43,22 @@ def docker_build(config: DevenvConfig) -> None:
         sys.exit(1)
 
 
-def docker_launch(config: DevenvConfig) -> None:
-    """Launch (or attach to) the project's dev container. Entry point for run scripts."""
+def docker_launch(
+    config: DevenvConfig,
+    *,
+    extend_parser: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+    pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
+) -> None:
+    """Launch (or attach to) the project's dev container. Entry point for run scripts.
+
+    Hooks for project-specific behavior:
+      extend_parser(parser): add project CLI flags before parsing.
+      pre_launch(args) -> list[str]: runs on the host just before `docker run`
+        for a fresh container; returns extra `docker run` args (e.g. device
+        passthrough, networking flags). Host-side side effects (loading kernel
+        modules, ...) belong here too. Not called when exec'ing into an
+        already-running container.
+    """
     parser = argparse.ArgumentParser(
         description=f"Launch (or attach to) the {config.name} dev container."
     )
@@ -53,6 +68,8 @@ def docker_launch(config: DevenvConfig) -> None:
                         help="container name (default: %(default)s)")
     parser.add_argument("-s", "--skip-image-version-check", action="store_true",
                         help="skip the image-version label check")
+    if extend_parser is not None:
+        extend_parser(parser)
     args = parser.parse_args()
 
     if is_container_running(args.instance_name):
@@ -60,21 +77,28 @@ def docker_launch(config: DevenvConfig) -> None:
         exec_into_running(args.instance_name, config.remote_user)
         return
 
-    _launch_fresh(config, args)
+    _launch_fresh(config, args, pre_launch)
 
 
-def _launch_fresh(config: DevenvConfig, args: argparse.Namespace) -> None:
+def _launch_fresh(
+    config: DevenvConfig,
+    args: argparse.Namespace,
+    pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
+) -> None:
     env = get_env_json(config.env_json_path)
     image = args.docker_image or env.get("DOCKER_IMAGE") or config.image
-    mount_dir = env.get("MOUNT_DIR")
-    if not mount_dir:
-        print("Error: MOUNT_DIR is not set. Run ./setup_wizard.py first.")
-        sys.exit(1)
-    if not os.path.isdir(mount_dir):
-        print(f"Error: mount dir {mount_dir} does not exist. Re-run ./setup_wizard.py.")
-        sys.exit(1)
-    assert not is_subpath(mount_dir, config.repo_root), \
-        f"Mount dir {mount_dir} must not live inside repo {config.repo_root}"
+
+    mount_dir = None
+    if config.container_mount_path is not None:
+        mount_dir = env.get("MOUNT_DIR")
+        if not mount_dir:
+            print("Error: MOUNT_DIR is not set. Run ./setup_wizard.py first.")
+            sys.exit(1)
+        if not os.path.isdir(mount_dir):
+            print(f"Error: mount dir {mount_dir} does not exist. Re-run ./setup_wizard.py.")
+            sys.exit(1)
+        assert not is_subpath(mount_dir, config.repo_root), \
+            f"Mount dir {mount_dir} must not live inside repo {config.repo_root}"
 
     if not args.skip_image_version_check and not check_image_version(
         image, config.min_image_version
@@ -83,6 +107,9 @@ def _launch_fresh(config: DevenvConfig, args: argparse.Namespace) -> None:
               "or pass --skip-image-version-check.")
         sys.exit(1)
 
+    extra_args = pre_launch(args) if pre_launch is not None else None
+
     run_container(
-        config, image=image, instance_name=args.instance_name, mount_dir=mount_dir
+        config, image=image, instance_name=args.instance_name,
+        mount_dir=mount_dir, extra_args=extra_args,
     )
