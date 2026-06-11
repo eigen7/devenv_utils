@@ -18,7 +18,7 @@ def get_env_json(path: os.PathLike) -> dict:
     return {}
 
 
-def update_env_json(path: os.PathLike, mappings: dict) -> None:
+def update_env_json(path: os.PathLike, mappings: dict):
     path = Path(path)
     env = get_env_json(path)
     env.update(mappings)

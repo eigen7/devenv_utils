@@ -78,7 +78,7 @@ def check_image_version(image: str, minimum: str) -> bool:
 
 # ---- Build -------------------------------------------------------------
 
-def _copy_into(src: Path, dst: Path) -> None:
+def _copy_into(src: Path, dst: Path):
     """Copy the *contents* of directory `src` into existing directory `dst`."""
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
@@ -89,7 +89,7 @@ def build_image(
     *,
     assets_dir: Optional[Path] = None,
     version: Optional[str] = None,
-) -> None:
+):
     """Build `image` from a staged context.
 
     The staged context is `context_dir` overlaid with `assets_dir` (defaults to
@@ -128,7 +128,7 @@ def is_container_running(name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
 
-def _run_with_tmux_rename(cmd: list) -> None:
+def _run_with_tmux_rename(cmd: list):
     """Run a long-lived interactive command, temporarily renaming the tmux
     window to "docker" (if we're inside tmux) so it's easy to spot."""
     old_name = None
@@ -145,7 +145,7 @@ def _run_with_tmux_rename(cmd: list) -> None:
             subprocess.run(["tmux", "rename-window", old_name], check=False)
 
 
-def exec_into_running(name: str, remote_user: str) -> None:
+def exec_into_running(name: str, remote_user: str):
     cmd = ["docker", "exec", "-it", name, "gosu", remote_user, "bash"]
     _run_with_tmux_rename(cmd)
 
@@ -178,7 +178,7 @@ def run_container(
     instance_name: str,
     mount_dir: Optional[str] = None,
     extra_args: Optional[list] = None,
-) -> None:
+):
     """`docker run` a fresh container for `config`, dropping into a shell.
 
     Bind-mounts the repo (and the mount dir, if the project uses one),

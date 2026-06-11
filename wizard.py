@@ -61,7 +61,7 @@ class SetupWizardTool:
 
     # ---- Step: docker permissions --------------------------------------
 
-    def validate_docker_permissions(self) -> None:
+    def validate_docker_permissions(self):
         print("Checking that you can run `docker` without sudo...")
         result = subprocess.run(
             ["docker", "ps"],
@@ -82,7 +82,7 @@ class SetupWizardTool:
 
     # ---- Step: VS Code attach config -----------------------------------
 
-    def setup_vscode_attach_config(self) -> None:
+    def setup_vscode_attach_config(self):
         c = self.config
         paths = vscode_attach_config_paths(c.instance_name)
         if not paths:
@@ -124,19 +124,19 @@ class SetupWizardTool:
     # ---- Step: build image ---------------------------------------------
 
     def build_docker_image(self, context: os.PathLike | None = None,
-                           version: str | None = None) -> None:
+                           version: str | None = None):
         c = self.config
         build_image(c.image, context or c.docker_context, version=version)
 
     # ---- Step: NVIDIA --------------------------------------------------
 
-    def validate_nvidia_driver(self) -> None:
+    def validate_nvidia_driver(self):
         validate_nvidia_driver()
 
-    def validate_nvidia_installation(self, image: str | None = None) -> None:
+    def validate_nvidia_installation(self, image: str | None = None):
         validate_nvidia_installation(image or self.config.image)
 
     # ---- Convenience ----------------------------------------------------
 
-    def rule(self) -> None:
+    def rule(self):
         print_rule()

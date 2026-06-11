@@ -11,15 +11,15 @@ class SetupException(Exception):
     """
 
 
-def print_red(text: str) -> None:
+def print_red(text: str):
     print(f"\033[31m{text}\033[0m")
 
 
-def print_green(text: str) -> None:
+def print_green(text: str):
     print(f"\033[32m{text}\033[0m")
 
 
-def print_rule() -> None:
+def print_rule():
     print(RULE)
 
 

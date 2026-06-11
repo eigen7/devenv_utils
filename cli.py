@@ -23,7 +23,7 @@ from .docker_ops import (
 from .state import get_env_json, in_docker_container, is_subpath
 
 
-def docker_build(config: DevenvConfig) -> None:
+def docker_build(config: DevenvConfig):
     """Build the project's local Docker image. Entry point for build scripts."""
     assert not in_docker_container(), \
         "the image build must run on the host, not inside the container."
@@ -48,7 +48,7 @@ def docker_launch(
     *,
     extend_parser: Optional[Callable[[argparse.ArgumentParser], None]] = None,
     pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
-) -> None:
+):
     """Launch (or attach to) the project's dev container. Entry point for run scripts.
 
     Hooks for project-specific behavior:
@@ -84,7 +84,7 @@ def _launch_fresh(
     config: DevenvConfig,
     args: argparse.Namespace,
     pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
-) -> None:
+):
     env = get_env_json(config.env_json_path)
     image = args.docker_image or env.get("DOCKER_IMAGE") or config.image
 

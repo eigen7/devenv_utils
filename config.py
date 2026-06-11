@@ -48,7 +48,7 @@ class DevenvConfig:
     # Where persisted user choices live. Defaults to <repo_root>/.env.json.
     env_json_path: Optional[Path] = None
 
-    def __post_init__(self) -> None:
+    def __post_init__(self):
         self.repo_root = Path(self.repo_root)
         if not self.image:
             self.image = self.name

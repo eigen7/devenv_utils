@@ -6,7 +6,7 @@ from .console import SetupException, print_green, print_red
 from .docker_ops import image_exists
 
 
-def validate_nvidia_driver() -> None:
+def validate_nvidia_driver():
     """Confirm the host NVIDIA driver is installed and working."""
     print("Validating NVIDIA driver (nvidia-smi on host)...")
     result = subprocess.run(
@@ -21,7 +21,7 @@ def validate_nvidia_driver() -> None:
     raise SetupException()
 
 
-def validate_nvidia_installation(image: str) -> None:
+def validate_nvidia_installation(image: str):
     """Confirm the GPU is accessible inside Docker via the Container Toolkit.
 
     Runs `docker run --gpus all <image> nvidia-smi`. On failure, first checks
