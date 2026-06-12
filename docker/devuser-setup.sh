@@ -33,6 +33,11 @@ fi
 if [ -e /workspace/.gitconfig_host ]; then
   ln -snf /workspace/.gitconfig_host ~/.gitconfig
 fi
+# Persist the VSCode server + installed extensions across --rm container
+# restarts, so extensions don't have to be reinstalled every relaunch.
+if [ -e /workspace/.vscode_server_host ]; then
+  ln -snf /workspace/.vscode_server_host ~/.vscode-server
+fi
 
 # .vimrc
 if ! [ -f ~/.vimrc ]; then
