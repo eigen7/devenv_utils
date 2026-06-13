@@ -40,6 +40,25 @@ def is_version_ok(version_str: str, minimum: str) -> bool:
         return False
 
 
+# Minimum Docker Engine version the wizard accepts. Docker enables CDI
+# (Container Device Interface) by default starting at 28.3.0; CDI is how a
+# generated /etc/cdi/nvidia.yaml grants the GPU to the container. On older
+# daemons CDI is off by default, so `--device nvidia.com/gpu=all` fails to
+# resolve and GPU access inside the container breaks.
+MIN_DOCKER_VERSION = "28.3.0"
+
+
+def docker_server_version() -> str:
+    """The Docker daemon's version (e.g. "28.3.3"), or "" if unavailable."""
+    result = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def get_image_label(image: str, label_key: str) -> Optional[str]:
     """Return the value of a single LABEL on a local Docker image, or None."""
     try:

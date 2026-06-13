@@ -12,7 +12,12 @@ from pathlib import Path
 
 from .config import DevenvConfig
 from .console import SetupException, print_green, print_red, print_rule, yes_no
-from .docker_ops import build_image
+from .docker_ops import (
+    MIN_DOCKER_VERSION,
+    build_image,
+    docker_server_version,
+    is_version_ok,
+)
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
 from .vscode_attach import (
@@ -78,6 +83,26 @@ class SetupWizardTool:
         else:
             print_red("`docker ps` failed:")
             print(result.stderr)
+        raise SetupException()
+
+    def validate_docker_version(self):
+        """Require a Docker daemon new enough to enable CDI by default.
+
+        CDI grants the GPU to the container via the generated
+        /etc/cdi/nvidia.yaml spec; Docker enables it by default only from
+        MIN_DOCKER_VERSION onward. On older daemons CDI is off, so
+        `--device nvidia.com/gpu=all` fails to resolve and GPU access breaks.
+        """
+        print(f"Checking Docker daemon version (need >= {MIN_DOCKER_VERSION})...")
+        version = docker_server_version()
+        if is_version_ok(version, MIN_DOCKER_VERSION):
+            print_green(f"Docker daemon version {version} is new enough.")
+            return
+        print_red(f"Docker daemon version {version or 'unknown'} is too old; "
+                  f"need >= {MIN_DOCKER_VERSION}.")
+        print("CDI (used to grant the GPU to the container) is enabled by default")
+        print("only from Docker 28.3.0. Upgrade Docker Engine and re-run:")
+        print("    https://docs.docker.com/engine/install/")
         raise SetupException()
 
     # ---- Step: VS Code attach config -----------------------------------
