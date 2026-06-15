@@ -24,6 +24,10 @@ import sys
 # directly under subtrees/ (README.md, __init__.py) are part of the parent.
 _SUBTREE_RE = re.compile(r"^subtrees/([^/]+)/")
 
+# This script's path within a consuming repo, used to self-identify in messages.
+_SELF = "subtrees/devenv_utils/commit_purity.py"
+_RULE = "=" * 72
+
 
 def _unit(path: str) -> str:
     """Return the unit a path belongs to: 'subtree:<name>' or 'parent'."""
@@ -46,23 +50,46 @@ def _git(args: list) -> list:
     return [line for line in out.splitlines() if line]
 
 
+def _err(*lines) -> None:
+    for line in lines:
+        print(line, file=sys.stderr)
+
+
 def _report(units: dict) -> None:
     for unit, files in sorted(units.items()):
-        print(f"    [{unit}]", file=sys.stderr)
-        for path in files:
-            print(f"      {path}", file=sys.stderr)
+        _err(f"    [{unit}]")
+        for path in files[:5]:
+            _err(f"      {path}")
+        if len(files) > 5:
+            _err(f"      ... and {len(files) - 5} more")
 
 
 def _check_staged() -> int:
-    units = _units(_git(["diff", "--cached", "--name-only", "--diff-filter=ACMRD"]))
-    if len(units) > 1:
-        print("commit-purity: a commit must touch only ONE unit -- a single "
-              "subtree, or the parent repo -- but these staged changes span "
-              "several:", file=sys.stderr)
-        _report(units)
-        print("Stage and commit each unit separately.", file=sys.stderr)
-        return 1
-    return 0
+    staged = _git(["diff", "--cached", "--name-only", "--diff-filter=ACMRD"])
+    units = _units(staged)
+    if len(units) <= 1:
+        return 0
+
+    _err("", _RULE)
+    _err("Your commit was blocked by the pre-commit hook")
+    _err(f"  (check: {_SELF})")
+    _err("")
+    _err("In this repo, a commit must touch only ONE unit -- a single subtree, or the parent")
+    _err("repo -- but these staged changes span several:")
+    _err("")
+    _report(units)
+    _err("")
+    _err("Fix: stage and commit each unit separately.")
+    if staged:
+        _err("")
+        _err("To unstage everything first (your file edits are kept):")
+        _err("    git reset")
+    _err("")
+    _err("To bypass this check for ONE commit -- only if you are SURE you want")
+    _err("a mixed commit:")
+    _err("    git commit --no-verify")
+    _err(_RULE)
+    return 1
 
 
 def _check_range(rng: str) -> int:
@@ -71,15 +98,24 @@ def _check_range(rng: str) -> int:
         units = _units(_git(["diff-tree", "--no-commit-id", "--name-only", "-r", sha]))
         if len(units) > 1:
             bad.append((sha, units))
-    if bad:
-        print("commit-purity: commits that mix multiple units (not allowed):",
-              file=sys.stderr)
-        for sha, units in bad:
-            print(f"  {sha[:12]}", file=sys.stderr)
-            _report(units)
-        return 1
-    print(f"commit-purity: OK -- every commit in {rng} touches a single unit.")
-    return 0
+
+    if not bad:
+        print(f"commit-purity: OK -- every commit in {rng} touches a single unit.")
+        return 0
+
+    _err("", _RULE)
+    _err("commit-purity: these commits each mix more than one unit")
+    _err(f"  (check: {_SELF})")
+    _err("")
+    for sha, units in bad:
+        _err(f"  commit {sha[:12]}")
+        _report(units)
+    _err("")
+    _err("Each commit must touch a single unit -- a single subtree, or the")
+    _err("parent repo. Split these commits (e.g. with `git rebase -i`) so each")
+    _err("touches only one unit.")
+    _err(_RULE)
+    return 1
 
 
 def main(argv: list) -> int:
