@@ -1,0 +1,18 @@
+#!/bin/sh
+# Pre-commit guard, shared via devenv_utils: a commit must touch exactly one
+# "unit" -- a single vendored subtree, or the parent repo. Delegates to the
+# vendored commit_purity.py so the hook and CI share one implementation.
+#
+# A `git subtree pull` is exempt: it records a merge commit, and git does not
+# run pre-commit on merges. This hook lives inside the subtree so any consuming
+# repo can activate it with `git config core.hooksPath <prefix>/hooks`; it
+# locates commit_purity.py relative to itself, so the prefix can be anything.
+
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+purity="$hook_dir/../commit_purity.py"
+
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$purity" --staged
+fi
+
+echo "pre-commit: python3 not found; skipping commit-purity check (CI still enforces it)." >&2
