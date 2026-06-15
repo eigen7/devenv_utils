@@ -7,7 +7,9 @@ directory) is held on the instance.
 """
 
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from .config import DevenvConfig
@@ -17,6 +19,7 @@ from .docker_ops import (
     build_image,
     docker_server_version,
     is_version_ok,
+    major_version,
 )
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
@@ -164,7 +167,60 @@ class SetupWizardTool:
     def setup_cdi(self):
         setup_cdi()
 
+    # ---- Setup version --------------------------------------------------
+
+    def rm_target_on_major_bump(self):
+        """Remove the build output directory when setup_version's major has
+        increased since the last recorded setup, discarding builds made against
+        an incompatible contract. Reads the previously committed version, so call
+        it before commit() writes the new one."""
+        c = self.config
+        stored = get_env_json(c.env_json_path).get("SETUP_VERSION")
+        if major_version(c.setup_version) <= major_version(stored or ""):
+            return
+        if c.target_dir.exists():
+            print(f"Setup version major increased ({stored or 'none'} -> "
+                  f"{c.setup_version}); removing {c.target_dir} to invalidate "
+                  f"existing builds.")
+            shutil.rmtree(c.target_dir)
+
+    def commit(self):
+        """Stamp setup_version into .env.json, recording a completed setup.
+
+        Call last, after every step has succeeded: entrypoints can gate on this
+        stamp, and rm_target_on_major_bump() compares against it on the next run."""
+        update_env_json(self.config.env_json_path, {"SETUP_VERSION": self.config.setup_version})
+
     # ---- Convenience ----------------------------------------------------
 
     def rule(self):
         print_rule()
+
+
+def check_setup_version(config: DevenvConfig) -> None:
+    """Exit with guidance to re-run the setup wizard when .env.json's stamp is
+    missing or older than config.setup_version.
+
+    Entrypoints call this before doing any real work, so a checkout whose setup
+    predates a contract change fails fast with a clear instruction instead of a
+    confusing downstream error. SetupWizardTool.commit() writes the stamp this
+    reads.
+    """
+    required = config.setup_version
+    stored = get_env_json(config.env_json_path).get("SETUP_VERSION")
+    if is_version_ok(stored or "", required):
+        return
+    reason = (
+        "No completed setup was found"
+        if not stored
+        else f"The recorded setup version {stored} is older than the required {required}"
+    )
+    print(
+        f"\n{'*' * 78}\n"
+        f"{reason}.\n"
+        f"Please (re-)run the setup wizard on the host, then try again:\n"
+        f"    ./setup_wizard.py\n"
+        f"{'*' * 78}",
+        file=sys.stderr,
+    )
+    sys.exit(1)

@@ -40,6 +40,15 @@ def is_version_ok(version_str: str, minimum: str) -> bool:
         return False
 
 
+def major_version(version_str: str) -> int:
+    """The major component (leading integer) of a dotted version, or 0 when it
+    is empty or unparseable."""
+    try:
+        return int(version_str.split(".")[0])
+    except (AttributeError, ValueError):
+        return 0
+
+
 # Minimum Docker Engine version the wizard accepts. Docker enables CDI
 # (Container Device Interface) by default starting at 28.3.0; CDI is how a
 # generated /etc/cdi/nvidia.yaml grants the GPU to the container. On older

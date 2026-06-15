@@ -25,6 +25,7 @@ from .docker_ops import (
     image_exists,
     is_container_running,
     is_version_ok,
+    major_version,
     parse_version_str,
     run_container,
 )
@@ -41,11 +42,12 @@ from .vscode_attach import (
     vscode_attach_config_paths,
     write_vscode_attach_config,
 )
-from .wizard import SetupWizardTool
+from .wizard import SetupWizardTool, check_setup_version
 
 __all__ = [
     "DevenvConfig",
     "SetupWizardTool",
+    "check_setup_version",
     "SetupException",
     "docker_build",
     "docker_launch",
@@ -62,6 +64,7 @@ __all__ = [
     "image_exists",
     "is_container_running",
     "is_version_ok",
+    "major_version",
     "parse_version_str",
     "run_container",
     "download",

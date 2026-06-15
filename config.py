@@ -48,6 +48,15 @@ class DevenvConfig:
     # Where persisted user choices live. Defaults to <repo_root>/.env.json.
     env_json_path: Optional[Path] = None
 
+    # Setup contract version stamped into .env.json by SetupWizardTool.commit()
+    # on a successful run. Entrypoints can gate on it, and bumping the major
+    # component triggers rm_target_on_major_bump(). The "0.0.0" default leaves
+    # the mechanism inert for projects that don't use it.
+    setup_version: str = "0.0.0"
+    # Build output directory removed by rm_target_on_major_bump() on a major
+    # setup_version bump. Defaults to <repo_root>/target.
+    target_dir: Optional[Path] = None
+
     def __post_init__(self):
         self.repo_root = Path(self.repo_root)
         if not self.image:
@@ -65,3 +74,6 @@ class DevenvConfig:
         if self.env_json_path is None:
             self.env_json_path = self.repo_root / ".env.json"
         self.env_json_path = Path(self.env_json_path)
+        if self.target_dir is None:
+            self.target_dir = self.repo_root / "target"
+        self.target_dir = Path(self.target_dir)
