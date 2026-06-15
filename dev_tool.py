@@ -88,12 +88,15 @@ class DevTool:
     def pull_git_subtrees(self, subtrees_root: str, *, assume_yes: bool = False) -> None:
         """Pull each declared subtree under *subtrees_root* to its upstream tip.
 
-        `git subtree pull` merges, so this refuses to run with a dirty working
-        tree. Prompts before each subtree unless assume_yes is set.
+        `git subtree pull` merges into the subtree prefix, so it only needs that
+        prefix to be clean; uncommitted changes elsewhere in the working tree
+        are left untouched. Refuses to run if anything under *subtrees_root* has
+        staged or unstaged changes. Prompts before each subtree unless
+        assume_yes is set.
         """
-        if not self._repo_is_clean():
-            _abort("working tree has uncommitted changes. Commit or stash them "
-                   "before pulling subtrees.")
+        if not self._path_is_clean(subtrees_root):
+            _abort(f"{subtrees_root}/ has uncommitted changes. Commit or stash "
+                   "them before pulling subtrees.")
         self._for_each_subtree(subtrees_root, "Pull", assume_yes, self._pull_one)
 
     def push_git_subtrees(self, subtrees_root: str, *, assume_yes: bool = False) -> None:
@@ -163,10 +166,14 @@ class DevTool:
         print(f"\n$ {' '.join(cmd)}")
         return subprocess.run(cmd, cwd=self.repo_root).returncode == 0
 
-    def _repo_is_clean(self) -> bool:
-        """Return True if the working tree has no staged or unstaged changes."""
+    def _path_is_clean(self, rel_path: str) -> bool:
+        """Return True if *rel_path* has no staged or unstaged changes.
+
+        Scoped to the given path so changes elsewhere in the working tree do
+        not block subtree operations.
+        """
         result = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--", rel_path],
             capture_output=True, text=True, cwd=self.repo_root,
         )
         return result.returncode == 0 and result.stdout.strip() == ""
