@@ -12,6 +12,21 @@ from typing import Optional
 
 
 @dataclass
+class SubtreeSpec:
+    """One vendored git subtree: where it lives and what it tracks upstream.
+
+    `name` is the directory name under the project's subtrees root (the prefix
+    is <subtrees_root>/<name>). git records neither the remote URL nor the
+    tracked branch anywhere committed, so both must be declared here; `branch`
+    defaults to "main".
+    """
+
+    name: str
+    url: str
+    branch: str = "main"
+
+
+@dataclass
 class DevenvConfig:
     name: str
     repo_root: Path
@@ -56,6 +71,11 @@ class DevenvConfig:
     # Build output directory removed by rm_target_on_major_bump() on a major
     # setup_version bump. Defaults to <repo_root>/target.
     target_dir: Optional[Path] = None
+
+    # Git subtrees vendored under the project's subtrees root, consumed by
+    # DevTool.pull_git_subtrees / push_git_subtrees. Empty for projects that
+    # don't vendor any.
+    subtrees: list[SubtreeSpec] = field(default_factory=list)
 
     def __post_init__(self):
         self.repo_root = Path(self.repo_root)

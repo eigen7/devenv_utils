@@ -6,8 +6,9 @@ either drives `SetupWizardTool` (interactive first-time setup) or calls the
 standalone helpers (build/run) directly.
 """
 
-from .config import DevenvConfig
+from .config import DevenvConfig, SubtreeSpec
 from .cli import docker_build, docker_launch
+from .dev_tool import DevTool
 from .console import (
     SetupException,
     print_green,
@@ -46,6 +47,8 @@ from .wizard import SetupWizardTool, check_setup_version
 
 __all__ = [
     "DevenvConfig",
+    "SubtreeSpec",
+    "DevTool",
     "SetupWizardTool",
     "check_setup_version",
     "SetupException",
