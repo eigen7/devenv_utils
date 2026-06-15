@@ -10,6 +10,7 @@ without the NVIDIA devices, and CUDA dies inside a running container
 declares the devices in the container spec, so they survive re-evaluation.
 """
 
+import re
 import subprocess
 
 from .console import SetupException, print_green, print_red, yes_no
@@ -33,19 +34,24 @@ def host_driver_version() -> str:
         return ""
 
 
+# Matches the version suffix of the driver's versioned libcuda (e.g. the
+# "580.159.03" in libcuda.so.580.159.03). The two-or-more numeric components
+# requirement skips the "libcuda.so.1" soname and "libcuda.so.1::/.../libcuda.so"
+# symlink directives that also appear in the spec.
+_LIBCUDA_VERSION_RE = re.compile(r"libcuda\.so\.(\d+(?:\.\d+)+)")
+
+
 def cdi_spec_driver_version() -> str:
     """The driver version recorded in the CDI spec, or "" if undetectable.
 
-    nvidia-ctk embeds the driver's libcuda path (e.g. libcuda.so.580.159.03)
-    in the spec; we grep for it rather than depending on a YAML parser.
+    nvidia-ctk references the driver's versioned libcuda (e.g.
+    libcuda.so.580.159.03) in the spec; we read the version out of that filename
+    rather than depending on a YAML parser.
     """
     if not cdi_spec_exists():
         return ""
-    text = CDI_SPEC_PATH.read_text()
-    for token in text.replace("\"", " ").split():
-        if "libcuda.so." in token:
-            return token.rsplit("libcuda.so.", 1)[1].strip("/")
-    return ""
+    match = _LIBCUDA_VERSION_RE.search(CDI_SPEC_PATH.read_text())
+    return match.group(1) if match else ""
 
 
 def setup_cdi():
