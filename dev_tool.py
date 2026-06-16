@@ -33,6 +33,25 @@ class DevTool:
     def repo_root(self) -> Path:
         return self._config.repo_root
 
+    # -- git hooks ----------------------------------------------------------
+
+    def ensure_git_hooks(self) -> None:
+        """Activate the vendored pre-commit guard for this checkout.
+
+        Points the repo's `core.hooksPath` at this subtree's `hooks/` dir, so
+        the read-only-subtree guard runs without any per-developer setup. The
+        path is computed relative to the repo root, so it works at whatever
+        prefix the subtree is vendored under. Because `.git` is bind-mounted
+        into the dev container, this one setting covers git run on both the host
+        and inside the container. Idempotent; a no-op outside a git checkout.
+        """
+        if not (self.repo_root / ".git").exists():
+            return
+        hooks_dir = Path(__file__).resolve().parent / "hooks"
+        rel = hooks_dir.relative_to(self.repo_root)
+        subprocess.run(["git", "config", "core.hooksPath", str(rel)],
+                       cwd=self.repo_root, check=False)
+
     # -- clang-format -------------------------------------------------------
 
     def clang_format_cli(self, cpp_dirs: list[str]) -> None:
