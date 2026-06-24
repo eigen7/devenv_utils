@@ -137,4 +137,5 @@ def _launch_fresh(
     run_container(
         config, image=image, instance_name=args.instance_name,
         mount_dir=mount_dir, extra_args=extra_args, port_offset=offset,
+        instance=instance
     )

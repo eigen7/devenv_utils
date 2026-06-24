@@ -238,6 +238,7 @@ def run_container(
     mount_dir: Optional[str] = None,
     extra_args: Optional[list] = None,
     port_offset: int = 0,
+    instance: int = 0,
 ):
     """`docker run` a fresh container for `config`, dropping into a shell.
 
@@ -254,11 +255,15 @@ def run_container(
     uid = subprocess.check_output(["id", "-u"], text=True).strip()
     gid = subprocess.check_output(["id", "-g"], text=True).strip()
 
+    hostname = config.container_hostname
+    if instance > 0:
+        hostname = f"{hostname}_{instance}"
+
     cmd = [
         "docker", "run", "--rm", "-it",
     ] + gpu_docker_args() + [
         "--name", instance_name,
-        "--hostname", config.container_hostname,
+        "--hostname", hostname,
         "-e", f"HOST_UID={uid}",
         "-e", f"HOST_GID={gid}",
         "-e", f"USERNAME={config.remote_user}",
