@@ -20,6 +20,12 @@ from .docker_ops import (
     is_container_running,
     run_container,
 )
+from .instances import (
+    assert_no_port_conflicts,
+    instance_number,
+    instanced_name,
+    port_offset,
+)
 from .state import get_env_json, in_docker_container, is_subpath
 
 
@@ -51,6 +57,11 @@ def docker_launch(
 ):
     """Launch (or attach to) the project's dev container. Entry point for run scripts.
 
+    The "INSTANCE" key in .env.json (default 0) selects a parallel instance:
+    instance N gets its own container name and forwards its ports shifted up by
+    instance_port_stride * N, so a second clone of the repo can run a container
+    alongside the first. See instances.py.
+
     Hooks for project-specific behavior:
       extend_parser(parser): add project CLI flags before parsing.
       pre_launch(args) -> list[str]: runs on the host just before `docker run`
@@ -59,12 +70,16 @@ def docker_launch(
         modules, ...) belong here too. Not called when exec'ing into an
         already-running container.
     """
+    env = get_env_json(config.env_json_path)
+    instance = instance_number(env)
+
     parser = argparse.ArgumentParser(
         description=f"Launch (or attach to) the {config.name} dev container."
     )
     parser.add_argument("-d", "--docker-image",
                         help=f"image to run (default: {config.image})")
-    parser.add_argument("-i", "--instance-name", default=config.instance_name,
+    parser.add_argument("-i", "--instance-name",
+                        default=instanced_name(config.instance_name, instance),
                         help="container name (default: %(default)s)")
     parser.add_argument("-s", "--skip-image-version-check", action="store_true",
                         help="skip the image-version label check")
@@ -77,16 +92,26 @@ def docker_launch(
         exec_into_running(args.instance_name, config.remote_user)
         return
 
-    _launch_fresh(config, args, pre_launch)
+    _launch_fresh(config, args, env, instance, pre_launch)
 
 
 def _launch_fresh(
     config: DevenvConfig,
     args: argparse.Namespace,
+    env: dict,
+    instance: int,
     pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
 ):
-    env = get_env_json(config.env_json_path)
     image = args.docker_image or env.get("DOCKER_IMAGE") or config.image
+
+    try:
+        assert_no_port_conflicts(
+            config.required_ports, instance, config.instance_port_stride
+        )
+    except SetupException as e:
+        print(e)
+        sys.exit(1)
+    offset = port_offset(instance, config.instance_port_stride)
 
     mount_dir = None
     if config.container_mount_path is not None:
@@ -111,5 +136,5 @@ def _launch_fresh(
 
     run_container(
         config, image=image, instance_name=args.instance_name,
-        mount_dir=mount_dir, extra_args=extra_args,
+        mount_dir=mount_dir, extra_args=extra_args, port_offset=offset,
     )

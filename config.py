@@ -48,8 +48,13 @@ class DevenvConfig:
     container_repo_path: str = "/workspace/repo"
     container_mount_path: Optional[str] = "/workspace/mount"
 
-    # Ports forwarded host -> container by run_docker.
+    # Ports forwarded host -> container by run_docker. For instance N (set via
+    # "INSTANCE" in .env.json) each is shifted up by instance_port_stride * N.
     required_ports: list[int] = field(default_factory=list)
+    # Per-instance port shift. Instance N forwards every required port plus
+    # instance_port_stride * N; the same offset is pushed into the container as
+    # DEVENV_INSTANCE_PORT_OFFSET. See instances.py.
+    instance_port_stride: int = 100
     # Extra static args appended to every `docker run` (e.g. ["--ipc=host"]).
     extra_docker_args: list[str] = field(default_factory=list)
     # Minimum acceptable value of the image's `version` label.

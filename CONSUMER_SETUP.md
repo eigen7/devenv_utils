@@ -70,8 +70,29 @@ consumer:
 ./py/tools/pull_git_subtrees.py
 ```
 
+## Running multiple instances in parallel
+
+To run dev containers from two clones of the same repo at once (e.g. two
+independent agent sessions on separate working trees), set `"INSTANCE": N` in
+the second clone's `.env.json` (default 0). `docker_launch` then, for instance
+N:
+
+- names the container `<instance_name>_N` (so the second launch starts a new
+  container instead of exec'ing into the first), and
+- shifts every `required_ports` entry up by `instance_port_stride * N` (stride
+  defaults to 100, override via `DevenvConfig`), aborting with a clear error if
+  that would collide with an instance 0..N-1.
+
+The offset is exported into the container as the `DEVENV_INSTANCE_PORT_OFFSET`
+environment variable (`instances.INSTANCE_PORT_OFFSET_ENV`). **In-container apps
+that bind hard-coded ports must read this variable and add it to their default
+ports**, so they bind the ports that are actually forwarded. This is the only
+project-side code needed — `setup_common.py` is untouched.
+
 ## What stays project-specific
 
-Only `setup_common.py` (your `DevenvConfig` + `SUBTREES` + project constants) and
-your own `setup_wizard.py` / `build.py` entrypoints and their custom steps.
-Everything else above is generic and identical across consumers.
+Only `setup_common.py` (your `DevenvConfig` + `SUBTREES` + project constants),
+your own `setup_wizard.py` / `build.py` entrypoints and their custom steps, and
+any in-container app reads of `DEVENV_INSTANCE_PORT_OFFSET` (see "Running
+multiple instances" above). Everything else above is generic and identical
+across consumers.
