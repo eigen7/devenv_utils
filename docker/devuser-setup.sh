@@ -25,18 +25,29 @@ if ! [ -f ~/.sqliterc ]; then
 EOF
 fi
 
-# Symlinks to the host-convenience bind mounts (see run_docker's
-# _convenience_mounts): Claude Code state and the host .gitconfig.
-if [ -e /workspace/.claude_history ]; then
-  ln -snf /workspace/.claude_history ~/.claude
+# Symlinks to the host-convenience bind mounts (see _convenience_mounts in docker_ops.py)
+if [ -e /workspace/.home-dir-soft-links/.claude ]; then
+  ln -snf /workspace/.home-dir-soft-links/.claude ~/.claude
 fi
-if [ -e /workspace/.gitconfig_host ]; then
-  ln -snf /workspace/.gitconfig_host ~/.gitconfig
+if [ -e /workspace/.home-dir-soft-links/.claude.json ]; then
+  ln -snf /workspace/.home-dir-soft-links/.claude.json ~/.claude.json
+fi
+if [ -e /workspace/.home-dir-soft-links/.gitconfig ]; then
+  ln -snf /workspace/.home-dir-soft-links/.gitconfig ~/.gitconfig
 fi
 # Persist the VSCode server + installed extensions across --rm container
 # restarts, so extensions don't have to be reinstalled every relaunch.
-if [ -e /workspace/.vscode_server_host ]; then
-  ln -snf /workspace/.vscode_server_host ~/.vscode-server
+if [ -e /workspace/.home-dir-soft-links/.vscode_server ]; then
+  ln -snf /workspace/.home-dir-soft-links/.vscode_server ~/.vscode-server
+fi
+
+# Ensure the native-style Claude binary path exists for statusline checks.
+if command -v claude >/dev/null 2>&1; then
+  mkdir -p ~/.local/bin
+  claude_bin=$(command -v claude)
+  if [ "$claude_bin" != "$HOME/.local/bin/claude" ]; then
+    ln -snf "$claude_bin" ~/.local/bin/claude
+  fi
 fi
 
 # .vimrc

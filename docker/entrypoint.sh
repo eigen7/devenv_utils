@@ -41,6 +41,10 @@ if getent group video >/dev/null; then usermod -aG video "$USERNAME"; fi
 mkdir -p /workspace
 chown "$USERNAME":"$USERNAME" /workspace
 
+# Make directory /workspace/.home-dir-soft-links:
+mkdir -p /workspace/.home-dir-soft-links
+chown "$USERNAME":"$USERNAME" /workspace/.home-dir-soft-links
+
 # Per-user dotfiles (idempotent), then exec the requested command as devuser.
 gosu "$USERNAME" /usr/local/bin/devuser-setup.sh
 exec gosu "$USERNAME" "$@"

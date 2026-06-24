@@ -6,6 +6,7 @@ a method here; project state that flows between steps (notably the chosen mount
 directory) is held on the instance.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -148,6 +149,58 @@ class SetupWizardTool:
                 print_green(f"Updated {p} (merged in remoteUser/workspaceFolder/containerName)")
             else:
                 print(f"{p} already up to date.")
+
+    # ---- Step: Claude trust --------------------------------------------
+
+    def setup_claude_trust(self):
+        """Pre-trust the container workspace paths in the host Claude config.
+
+        The host ~/.claude.json is bind-mounted into the container, so writing
+        trust here avoids an interactive trust prompt when Claude starts inside
+        /workspace and /workspace/repo.
+        """
+        claude_config_path = Path.home() / ".claude.json"
+        try:
+            if claude_config_path.exists():
+                raw = claude_config_path.read_text(encoding="utf-8").strip()
+                cfg = json.loads(raw) if raw else {}
+                if not isinstance(cfg, dict):
+                    raise ValueError("top-level JSON must be an object")
+            else:
+                cfg = {}
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print_red(f"Could not update {claude_config_path}: {e}")
+            return
+
+        projects = cfg.setdefault("projects", {})
+        if not isinstance(projects, dict):
+            print_red(f"Could not update {claude_config_path}: 'projects' is not an object")
+            return
+
+        changed = False
+        for trusted_path in ("/workspace", "/workspace/repo"):
+            project_cfg = projects.setdefault(trusted_path, {})
+            if not isinstance(project_cfg, dict):
+                project_cfg = {}
+                projects[trusted_path] = project_cfg
+            if project_cfg.get("hasTrustDialogAccepted") is not True:
+                project_cfg["hasTrustDialogAccepted"] = True
+                changed = True
+
+        if not changed:
+            print_green("Claude trust already configured for /workspace paths.")
+            return
+
+        try:
+            claude_config_path.write_text(
+                json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as e:
+            print_red(f"Could not write {claude_config_path}: {e}")
+            return
+
+        print_green("Configured Claude workspace trust for /workspace and /workspace/repo.")
 
     # ---- Step: build image ---------------------------------------------
 

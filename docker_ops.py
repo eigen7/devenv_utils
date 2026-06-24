@@ -205,14 +205,13 @@ def _convenience_mounts() -> list:
     These land at neutral paths under /workspace (outside /home, so they don't
     interfere with the entrypoint's useradd); devuser-setup.sh symlinks them
     into the dev user's home.
-      ~/.claude         -> /workspace/.claude_history       (Claude Code state)
-      ~/.gitconfig      -> /workspace/.gitconfig_host       (commits get name/email)
-      ~/.vscode-server  -> /workspace/.vscode_server_host   (VSCode server + extensions)
     """
     claude_dir = Path.home() / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
-    # touch() prevents Docker from pre-creating this as a root-owned
-    # directory if it's missing on the host.
+    # touch() prevents Docker from pre-creating these as root-owned
+    # files/directories if they're missing on the host.
+    claude_json = Path.home() / ".claude.json"
+    claude_json.touch(exist_ok=True)
     gitconfig = Path.home() / ".gitconfig"
     gitconfig.touch(exist_ok=True)
     # VSCode installs its server + extensions into ~/.vscode-server inside the
@@ -224,9 +223,10 @@ def _convenience_mounts() -> list:
     vscode_server = Path.home() / ".devenv_vscode_server"
     vscode_server.mkdir(parents=True, exist_ok=True)
     return [
-        "-v", f"{claude_dir}:/workspace/.claude_history",
-        "-v", f"{gitconfig}:/workspace/.gitconfig_host",
-        "-v", f"{vscode_server}:/workspace/.vscode_server_host",
+        "-v", f"{claude_dir}:/workspace/.home-dir-soft-links/.claude",
+        "-v", f"{claude_json}:/workspace/.home-dir-soft-links/.claude.json",
+        "-v", f"{gitconfig}:/workspace/.home-dir-soft-links/.gitconfig",
+        "-v", f"{vscode_server}:/workspace/.home-dir-soft-links/.vscode_server",
     ]
 
 
