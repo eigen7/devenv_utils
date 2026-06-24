@@ -257,7 +257,7 @@ def run_container(
 
     hostname = config.container_hostname
     if instance > 0:
-        hostname = f"{hostname}_{instance}"
+        hostname = f"{hostname}-{instance}"
 
     cmd = [
         "docker", "run", "--rm", "-it",
