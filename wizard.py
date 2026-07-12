@@ -68,6 +68,31 @@ class SetupWizardTool:
         self.mount_dir = Path(target)
         return self.mount_dir
 
+    # ---- Step: git config -----------------------------------------------
+
+    def setup_git_config(self):
+        """Apply the git settings that keep submodules in sync (SUBMODULES.md).
+
+        - submodule.recurse=true: `git pull` / `git checkout` update each
+          submodule working tree to match the commit the superproject
+          records, so a checkout can't silently go stale.
+        - push.recurseSubmodules=check: git refuses to push a commit whose
+          submodule pointer references a commit absent from the submodule's
+          remote, which would break every other clone.
+
+        Also clears core.hooksPath: devenv_utils wires no custom git hooks,
+        so git should use the repo's default .git/hooks.
+        """
+        repo_root = self.config.repo_root
+        for key, value in [
+            ("submodule.recurse", "true"),
+            ("push.recurseSubmodules", "check"),
+        ]:
+            subprocess.run(["git", "config", key, value], cwd=repo_root, check=True)
+        subprocess.run(["git", "config", "--unset", "core.hooksPath"],
+                       cwd=repo_root, check=False)
+        print_green("Configured git for submodule syncing.")
+
     # ---- Step: docker permissions --------------------------------------
 
     def validate_docker_permissions(self):
