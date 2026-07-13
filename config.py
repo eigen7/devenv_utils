@@ -8,7 +8,6 @@ from those, and can be overridden per project.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -24,14 +23,14 @@ class DevenvConfig:
     # Hostname inside the container. Defaults to f"{name}-container".
     container_hostname: str = ""
     # Suggested host mount dir during setup. Defaults to ~/<name>.
-    default_mount_dir: Optional[Path] = None
+    default_mount_dir: Path | None = None
 
     # Where the repo / mount dir are bind-mounted inside the container.
     # Set container_mount_path to None for projects that don't need a
     # persistent mount dir: the wizard's mount-dir step and run_docker's
     # MOUNT_DIR requirement are then skipped entirely.
     container_repo_path: str = "/workspace/repo"
-    container_mount_path: Optional[str] = "/workspace/mount"
+    container_mount_path: str | None = "/workspace/mount"
 
     # Ports forwarded host -> container by run_docker. For instance N (set via
     # "INSTANCE" in .env.json) each is shifted up by instance_port_stride * N.
@@ -47,9 +46,9 @@ class DevenvConfig:
 
     # Docker build context (holds the project Dockerfile). Defaults to
     # <repo_root>/docker-setup.
-    docker_context: Optional[Path] = None
+    docker_context: Path | None = None
     # Where persisted user choices live. Defaults to <repo_root>/.env.json.
-    env_json_path: Optional[Path] = None
+    env_json_path: Path | None = None
 
     # Setup contract version stamped into .env.json by SetupWizardTool.commit()
     # on a successful run. Entrypoints can gate on it via check_setup_version(),
@@ -61,7 +60,12 @@ class DevenvConfig:
     setup_version: str = "0.0.0"
     # Build output directory removed by rm_target_on_major_bump() on a major
     # setup_version bump. Defaults to <repo_root>/target.
-    target_dir: Optional[Path] = None
+    target_dir: Path | None = None
+    # Directory holding the PR workflow's per-task git worktrees (pr_flow.py).
+    # Defaults to <container_mount_path>/worktrees/<name>, so projects sharing
+    # a mount cannot collide. Meaningful only inside the container, and only
+    # for projects with a mount dir.
+    worktrees_dir: Path | None = None
 
     def __post_init__(self):
         self.repo_root = Path(self.repo_root)
@@ -83,3 +87,7 @@ class DevenvConfig:
         if self.target_dir is None:
             self.target_dir = self.repo_root / "target"
         self.target_dir = Path(self.target_dir)
+        if self.worktrees_dir is None and self.container_mount_path is not None:
+            self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
+        if self.worktrees_dir is not None:
+            self.worktrees_dir = Path(self.worktrees_dir)

@@ -17,13 +17,30 @@ restating the rules.
 1. Edit in place under `submodules/<name>/`.
 2. Commit **inside the submodule** — that commit belongs to the submodule's
    repo, not the superproject.
-3. Push it to the submodule's upstream (coordinate with the repo owner if you
-   lack push access).
-4. Commit the pointer bump in the superproject: `git add submodules/<name>`.
+3. Commit the pointer bump in the superproject: `git add submodules/<name>`.
+   A commit's hash is fixed by its content the moment it is created, so the
+   pointer bump can be prepared (and reviewed) immediately — the submodule
+   commit does not have to be upstream yet.
 
-Never commit a superproject pointer that references an unpushed submodule
-commit: other clones could not fetch it. `push.recurseSubmodules=check`
-(below) backstops this at push time.
+## Publishing
+
+Publish in dependency order: a submodule commit must reach the submodule's
+upstream **before** any superproject commit referencing it is published, or
+other clones cannot fetch it. From the superproject root on the host (where
+upstream credentials live):
+
+```
+python3 submodules/devenv_utils/push_upstream.py
+```
+
+pushes every submodule pointer commit that upstream is missing (plain
+fast-forwards; divergence fails loudly), then prints the superproject push
+command to run next. `push.recurseSubmodules=check` (below) makes git refuse
+any superproject push that would break the order.
+
+Coding agents cannot push upstream (credentials live on the host): an agent
+whose change touches a submodule must end by asking the user to run the
+command above, noting that it prints the follow-up superproject push.
 
 To update a submodule to its upstream tip without local changes:
 
@@ -50,9 +67,20 @@ wizard) applies two settings:
 * `push.recurseSubmodules=check` — git refuses to push a commit whose
   submodule pointer references a commit absent from the submodule's remote.
 
+(`push.recurseSubmodules=on-demand` would instead push the submodule
+automatically during a superproject push, but it cannot push from a
+detached-HEAD submodule checkout — the normal state of a checkout synced by
+`git submodule update` — so the explicit push_upstream.py flow above is the
+reliable path, with `check` as the guard.)
+
 ## Worktrees
 
 * `git worktree add` does **not** populate submodules: run
   `git -C <worktree> submodule update --init` after creating one.
+* pr_flow.py (the worktree/PR workflow tool) instead clones a new worktree's
+  submodules from the main checkout's copies, which also covers pointers whose
+  submodule commit has not been pushed upstream yet — upstream cannot serve
+  those, and a detached pointer commit cannot be fetched by SHA without
+  `uploadpack.allowAnySHA1InWant`.
 * `git worktree remove` refuses to remove a worktree containing a populated
   submodule; pass `--force`.
