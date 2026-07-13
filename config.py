@@ -42,8 +42,6 @@ class DevenvConfig:
     instance_port_stride: int = 100
     # Extra static args appended to every `docker run` (e.g. ["--ipc=host"]).
     extra_docker_args: list[str] = field(default_factory=list)
-    # Minimum acceptable value of the image's `version` label.
-    min_image_version: str = "0.0.0"
     # Unprivileged user the container runs as / VS Code attaches as.
     remote_user: str = "devuser"
 
@@ -54,9 +52,12 @@ class DevenvConfig:
     env_json_path: Optional[Path] = None
 
     # Setup contract version stamped into .env.json by SetupWizardTool.commit()
-    # on a successful run. Entrypoints can gate on it, and bumping the major
-    # component triggers rm_target_on_major_bump(). The "0.0.0" default leaves
-    # the mechanism inert for projects that don't use it.
+    # on a successful run. Entrypoints can gate on it via check_setup_version(),
+    # so bumping it forces users back through the wizard -- the way to roll out
+    # any setup-side change, including Dockerfile changes that need an image
+    # rebuild. Bumping the major component additionally triggers
+    # rm_target_on_major_bump(). The "0.0.0" default leaves the mechanism inert
+    # for projects that don't use it.
     setup_version: str = "0.0.0"
     # Build output directory removed by rm_target_on_major_bump() on a major
     # setup_version bump. Defaults to <repo_root>/target.
