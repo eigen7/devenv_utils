@@ -23,7 +23,7 @@ from .instances import INSTANCE_PORT_OFFSET_ENV
 SHARED_DOCKER_ASSETS = Path(__file__).resolve().parent / "docker"
 
 
-# ---- Image version labels ----------------------------------------------
+# ---- Version strings -----------------------------------------------------
 
 Version = Tuple[int, ...]
 
@@ -69,40 +69,11 @@ def docker_server_version() -> str:
     return result.stdout.strip()
 
 
-def get_image_label(image: str, label_key: str) -> Optional[str]:
-    """Return the value of a single LABEL on a local Docker image, or None."""
-    try:
-        result = subprocess.check_output(
-            [
-                "docker", "inspect",
-                f"--format={{{{index .Config.Labels \"{label_key}\"}}}}",
-                image,
-            ],
-            stderr=subprocess.STDOUT,
-            text=True,
-        ).strip()
-    except subprocess.CalledProcessError:
-        return None
-    return result or None
-
-
 def image_exists(image: str) -> bool:
     return subprocess.run(
         ["docker", "image", "inspect", image],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     ).returncode == 0
-
-
-def check_image_version(image: str, minimum: str) -> bool:
-    """Print a diagnostic and return whether `image`'s version label is OK."""
-    version = get_image_label(image, "version")
-    if is_version_ok(version, minimum):
-        return True
-    if version is None:
-        print("Image is missing a `version` label; it may be out of date.")
-    else:
-        print(f"Image version {version} < required {minimum}.")
-    return False
 
 
 # ---- Build -------------------------------------------------------------
@@ -117,7 +88,6 @@ def build_image(
     context_dir: Path,
     *,
     assets_dir: Optional[Path] = None,
-    version: Optional[str] = None,
 ):
     """Build `image` from a staged context.
 
@@ -136,10 +106,7 @@ def build_image(
         _copy_into(context_dir, staged)
         if Path(assets_dir).is_dir():
             _copy_into(assets_dir, staged)
-        cmd = ["docker", "build", "-t", image]
-        if version is not None:
-            cmd += ["--build-arg", f"VERSION={version}"]
-        cmd += [str(staged)]
+        cmd = ["docker", "build", "-t", image, str(staged)]
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:

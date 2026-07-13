@@ -32,5 +32,5 @@ def is_subpath(child: os.PathLike, parent: os.PathLike) -> bool:
 
 
 def in_docker_container() -> bool:
-    # Set by the Dockerfile via `ENV DOCKER_IMAGE_VERSION=...`.
-    return "DOCKER_IMAGE_VERSION" in os.environ
+    # Docker creates /.dockerenv at the root of every container's filesystem.
+    return Path("/.dockerenv").exists()

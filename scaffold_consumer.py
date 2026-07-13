@@ -93,10 +93,9 @@ from submodules.devenv_utils import (  # noqa: E402
     check_setup_version as _check_setup_version,
 )
 
-# Bump to force users to rerun the setup wizard (major bump wipes target/).
+# Bump to force users to rerun the setup wizard, e.g. after a Dockerfile
+# change that requires an image rebuild (major bump wipes target/).
 SETUP_VERSION = "1.0.0"
-# Bump when the Dockerfile changes in a way that requires a rebuild.
-MINIMUM_REQUIRED_IMAGE_VERSION = "0.0.0"
 # Ports forwarded host -> container by run_docker.py.
 REQUIRED_PORTS = []
 
@@ -116,7 +115,6 @@ def make_config() -> DevenvConfig:
         name="CHANGE_ME",
         repo_root=REPO_ROOT,
         required_ports=REQUIRED_PORTS,
-        min_image_version=MINIMUM_REQUIRED_IMAGE_VERSION,
         setup_version=SETUP_VERSION,
     )
 ''',

@@ -229,10 +229,9 @@ class SetupWizardTool:
 
     # ---- Step: build image ---------------------------------------------
 
-    def build_docker_image(self, context: os.PathLike | None = None,
-                           version: str | None = None):
+    def build_docker_image(self, context: os.PathLike | None = None):
         c = self.config
-        build_image(c.image, context or c.docker_context, version=version)
+        build_image(c.image, context or c.docker_context)
 
     # ---- Step: NVIDIA --------------------------------------------------
 

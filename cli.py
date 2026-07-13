@@ -15,7 +15,6 @@ from .config import DevenvConfig
 from .console import SetupException
 from .docker_ops import (
     build_image,
-    check_image_version,
     exec_into_running,
     is_container_running,
     run_container,
@@ -81,8 +80,6 @@ def docker_launch(
     parser.add_argument("-i", "--instance-name",
                         default=instanced_name(config.instance_name, instance),
                         help="container name (default: %(default)s)")
-    parser.add_argument("-s", "--skip-image-version-check", action="store_true",
-                        help="skip the image-version label check")
     if extend_parser is not None:
         extend_parser(parser)
     args = parser.parse_args()
@@ -124,13 +121,6 @@ def _launch_fresh(
             sys.exit(1)
         assert not is_subpath(mount_dir, config.repo_root), \
             f"Mount dir {mount_dir} must not live inside repo {config.repo_root}"
-
-    if not args.skip_image_version_check and not check_image_version(
-        image, config.min_image_version
-    ):
-        print("Run ./build_docker_image.py to rebuild, "
-              "or pass --skip-image-version-check.")
-        sys.exit(1)
 
     extra_args = pre_launch(args) if pre_launch is not None else None
 
