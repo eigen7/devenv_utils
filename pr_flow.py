@@ -8,8 +8,9 @@ commands:
 
   py/tools/pr.py worktree <branch>
       New worktree at <worktrees_dir>/<branch> on a new branch <branch>, with
-      submodules populated and a Claude commit identity, so the PR
-      distinguishes Claude's commits from the user's.
+      submodules populated, the main checkout's .env.json setup stamp copied
+      over, and a Claude commit identity, so the PR distinguishes Claude's
+      commits from the user's.
 
   py/tools/pr.py create <branch> --title ... [--body-file ... | --body ...]
       Start the Gitea stack if needed, push the branch, and open the PR --
@@ -28,6 +29,7 @@ import argparse
 import base64
 import json
 import secrets
+import shutil
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -103,15 +105,38 @@ def init_submodules(cfg: DevenvConfig, worktree: Path):
         check=True,
         cwd=worktree,
     )
+    sub_paths = []
     for line in listing.stdout.splitlines():
         key, sub_path = line.split(" ", 1)
         name = key.removeprefix("submodule.").removesuffix(".path")
+        sub_paths.append(sub_path)
         local_copy = cfg.repo_root / sub_path
         run(["git", "config", "uploadpack.allowAnySHA1InWant", "true"], cwd=local_copy)
         run(["git", "config", f"submodule.{name}.url", str(local_copy)], cwd=worktree)
     # protocol.file.allow: git blocks file-path submodule clones by default
     # (CVE-2022-39253 hardening); the main checkout is trusted.
     run(["git", "-c", "protocol.file.allow=always", "submodule", "update"], cwd=worktree)
+    # The same Claude identity cmd_worktree gives the superproject worktree:
+    # editing a submodule in place is part of the documented workflow (see
+    # SUBMODULES.md), and its commits belong to the same PR authorship.
+    for sub_path in sub_paths:
+        run(["git", "config", "user.name", "Claude"], cwd=worktree / sub_path)
+        run(["git", "config", "user.email", CLAUDE_EMAIL], cwd=worktree / sub_path)
+
+
+def copy_setup_state(cfg: DevenvConfig, worktree: Path):
+    """Copy the main checkout's .env.json into a fresh worktree.
+
+    The file is untracked per-checkout state: the setup wizard's version stamp
+    (which every entry point gates on via check_setup_version) plus any env
+    mappings the wizard recorded. A worktree without it refuses to build until
+    the wizard is re-run, yet the main checkout's completed setup already
+    covers it -- both checkouts live in the same container and share the same
+    machine-level provisioning -- so the stamp is copied rather than
+    re-earned.
+    """
+    rel = cfg.env_json_path.relative_to(cfg.repo_root)
+    shutil.copy2(cfg.env_json_path, worktree / rel)
 
 
 def worktree_path_for(cfg: DevenvConfig, branch: str) -> Path | None:
@@ -135,8 +160,10 @@ def worktree_path_for(cfg: DevenvConfig, branch: str) -> Path | None:
 def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
     path = cfg.worktrees_dir / args.branch
     run(["git", "worktree", "add", str(path), "-b", args.branch], cwd=cfg.repo_root)
-    # Worktrees don't inherit the main checkout's submodules.
+    # Worktrees don't inherit the main checkout's submodules or its untracked
+    # setup stamp.
     init_submodules(cfg, path)
+    copy_setup_state(cfg, path)
     run(["git", "config", "extensions.worktreeConfig", "true"], cwd=cfg.repo_root)
     run(["git", "config", "--worktree", "user.name", "Claude"], cwd=path)
     run(["git", "config", "--worktree", "user.email", CLAUDE_EMAIL], cwd=path)
