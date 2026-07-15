@@ -39,8 +39,9 @@ class SetupWizardTool:
 
     def setup_mount_dir(self) -> Path:
         c = self.config
-        assert c.container_mount_path is not None, \
+        assert c.container_mount_path is not None, (
             f"{c.name} has no container_mount_path; skip the mount-dir step."
+        )
         print(f"{c.name} needs a persistent directory on the host that gets")
         print(f"bind-mounted into the Docker container at {c.container_mount_path}.")
         print("It holds data that must outlive any single container, and it MUST")
@@ -71,7 +72,7 @@ class SetupWizardTool:
     # ---- Step: git config -----------------------------------------------
 
     def setup_git_config(self):
-        """Apply the git settings that keep submodules in sync (SUBMODULES.md).
+        """Apply the git settings the workflow depends on (SUBMODULES.md).
 
         - submodule.recurse=true: `git pull` / `git checkout` update each
           submodule working tree to match the commit the superproject
@@ -79,19 +80,44 @@ class SetupWizardTool:
         - push.recurseSubmodules=check: git refuses to push a commit whose
           submodule pointer references a commit absent from the submodule's
           remote, which would break every other clone.
+        - alias.publish: `git publish` runs publish.py (the host-side publish
+          step).
+        - a pre-push hook (prepush_guard.py) that steers a stray `git push` to
+          GitHub origin back to `git publish`.
 
-        Also clears core.hooksPath: devenv_utils wires no custom git hooks,
-        so git should use the repo's default .git/hooks.
+        Clears core.hooksPath so git uses the repo's default hooks directory,
+        where the pre-push hook is installed.
         """
         repo_root = self.config.repo_root
+        publish = '!"$(git rev-parse --show-toplevel)"/submodules/devenv_utils/publish.py'
         for key, value in [
             ("submodule.recurse", "true"),
             ("push.recurseSubmodules", "check"),
+            ("alias.publish", publish),
         ]:
             subprocess.run(["git", "config", key, value], cwd=repo_root, check=True)
-        subprocess.run(["git", "config", "--unset", "core.hooksPath"],
-                       cwd=repo_root, check=False)
-        print_green("Configured git for submodule syncing.")
+        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo_root, check=False)
+        self._install_pre_push_hook(repo_root)
+        print_green("Configured git for submodule syncing, `git publish`, and the push guard.")
+
+    @staticmethod
+    def _install_pre_push_hook(repo_root: Path):
+        """Install the pre-push guard into the repo's shared hooks directory."""
+        common_dir = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        hook = Path(common_dir) / "hooks" / "pre-push"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(
+            "#!/bin/sh\n"
+            'exec "$(git rev-parse --show-toplevel)"'
+            '/submodules/devenv_utils/prepush_guard.py "$@"\n'
+        )
+        hook.chmod(0o755)
 
     # ---- Step: docker permissions --------------------------------------
 
@@ -99,7 +125,9 @@ class SetupWizardTool:
         print("Checking that you can run `docker` without sudo...")
         result = subprocess.run(
             ["docker", "ps"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         if result.returncode == 0:
             print_green("Docker is usable without sudo.")
@@ -127,8 +155,10 @@ class SetupWizardTool:
         if is_version_ok(version, MIN_DOCKER_VERSION):
             print_green(f"Docker daemon version {version} is new enough.")
             return
-        print_red(f"Docker daemon version {version or 'unknown'} is too old; "
-                  f"need >= {MIN_DOCKER_VERSION}.")
+        print_red(
+            f"Docker daemon version {version or 'unknown'} is too old; "
+            f"need >= {MIN_DOCKER_VERSION}."
+        )
         print("CDI (used to grant the GPU to the container) is enabled by default")
         print("only from Docker 28.3.0. Upgrade Docker Engine and re-run:")
         print("    https://docs.docker.com/engine/install/")
@@ -144,7 +174,7 @@ class SetupWizardTool:
             print("(Code / Code - Insiders / VSCodium). Skipping VS Code attach")
             print("config. If you install VS Code later, re-run this wizard, or")
             print("manually use 'Dev Containers: Open Named Container Configuration")
-            print(f"File' and set \"remoteUser\": \"{c.remote_user}\".")
+            print(f'File\' and set "remoteUser": "{c.remote_user}".')
             return
 
         print("VS Code's 'Attach to Running Container' command does NOT read")
@@ -256,9 +286,11 @@ class SetupWizardTool:
         if major_version(c.setup_version) <= major_version(stored or ""):
             return
         if c.target_dir.exists():
-            print(f"Setup version major increased ({stored or 'none'} -> "
-                  f"{c.setup_version}); removing {c.target_dir} to invalidate "
-                  f"existing builds.")
+            print(
+                f"Setup version major increased ({stored or 'none'} -> "
+                f"{c.setup_version}); removing {c.target_dir} to invalidate "
+                f"existing builds."
+            )
             shutil.rmtree(c.target_dir)
 
     def commit(self):
