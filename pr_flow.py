@@ -167,6 +167,21 @@ def copy_setup_state(main: Path, cfg: DevenvConfig, worktree: Path):
     shutil.copy2(main / rel, worktree / rel)
 
 
+def pr_head_branch(pr: dict) -> str:
+    """The PR's head branch name, robust to the branch already being deleted.
+
+    Gitea reports head.ref as the branch name while it exists but degrades it to
+    'refs/pull/N/head' once the branch is gone (e.g. a web-UI merge, or a re-run
+    after a prior run deleted the remote branch). head.label keeps the original
+    name across that -- 'branch' for a same-repo PR, 'owner:branch' for a fork --
+    so fall back to it and strip any owner prefix.
+    """
+    ref = pr["head"]["ref"]
+    if ref.startswith("refs/pull/"):
+        return pr["head"]["label"].split(":", 1)[-1]
+    return ref
+
+
 def delete_remote_branch(backend_port: int, owner: str, name: str, branch: str, admin: dict):
     """Delete the PR's remote branch, tolerating its prior deletion so a
     re-run after a partial failure succeeds."""
@@ -249,8 +264,9 @@ def delete_local_branch(main: Path, branch: str, *, force: bool):
         )
 
 
-def teardown_branch(main: Path, branch: str, *, force: bool):
-    """Remove `branch`'s worktree (if any), then delete the branch.
+def teardown_branch(main: Path, branch: str, *, force: bool) -> bool:
+    """Remove `branch`'s worktree (if any), then delete the branch. Returns
+    whether a worktree was actually removed.
 
     Order matters: git refuses to delete a branch that is checked out in a
     live worktree, so the worktree goes first. Both steps are idempotent.
@@ -260,6 +276,7 @@ def teardown_branch(main: Path, branch: str, *, force: bool):
         # --force: git refuses to remove a worktree with populated submodules.
         run(["git", "worktree", "remove", "--force", str(worktree)], cwd=main)
     delete_local_branch(main, branch, force=force)
+    return worktree is not None
 
 
 def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
@@ -321,9 +338,10 @@ def cmd_merge(cfg: DevenvConfig, args: argparse.Namespace):
     admin, _, backend_port = ensure_serving(cfg)
     owner = admin["username"]
     pr = api("GET", backend_port, f"/repos/{owner}/{cfg.name}/pulls/{args.number}", admin)
-    branch = pr["head"]["ref"]
-    # Each step below is idempotent, so a re-run after a partial failure
-    # completes the cleanup rather than erroring.
+    branch = pr_head_branch(pr)
+    # Each step below is idempotent, so a re-run after a partial failure -- or a
+    # merge already done in the web UI -- completes the cleanup rather than
+    # erroring.
     if not pr["merged"]:
         api(
             "POST",
@@ -338,10 +356,9 @@ def cmd_merge(cfg: DevenvConfig, args: argparse.Namespace):
     run(["git", "-c", "submodule.recurse=false", "pull", "--ff-only", "gitea", "main"], cwd=main)
     sync_submodules(main)
     delete_remote_branch(backend_port, owner, cfg.name, branch, admin)
-    teardown_branch(main, branch, force=False)
-    print(
-        f"PR #{args.number} ({branch}) merged; primary checkout fast-forwarded, worktree removed."
-    )
+    removed = teardown_branch(main, branch, force=False)
+    cleanup = "worktree removed" if removed else "no local worktree to remove"
+    print(f"PR #{args.number} ({branch}) merged; primary checkout fast-forwarded, {cleanup}.")
 
 
 def cmd_abandon(cfg: DevenvConfig, args: argparse.Namespace):
@@ -353,8 +370,9 @@ def cmd_abandon(cfg: DevenvConfig, args: argparse.Namespace):
         return
     # force=True: an abandoned branch is typically unmerged, and the user has
     # deliberately chosen to discard it (see the stale-worktree report).
-    teardown_branch(main, branch, force=True)
-    print(f"Abandoned {branch}: worktree removed and branch deleted.")
+    removed = teardown_branch(main, branch, force=True)
+    what = "worktree removed and branch deleted" if removed else "branch deleted (no worktree)"
+    print(f"Abandoned {branch}: {what}.")
 
 
 def parse_args() -> argparse.Namespace:
