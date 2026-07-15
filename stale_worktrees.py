@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Report git worktrees with no recent activity, so abandoned ones get cleaned up.
 
 The PR workflow (pr_flow.py) creates a worktree per task. A task abandoned
@@ -12,17 +13,27 @@ user to decide what to delete.
 worktree index's mtime (staging), and the mtimes of files git reports as
 changed or untracked (unstaged edits).
 
-Consumer repos expose this through a thin py/tools/stale_worktrees.py shim;
-gitea_serve.py also prints the same report every time it runs.
+Run this module directly from a consumer repo; it reads that repo's devenv.toml
+(see config.load_config). gitea_serve.py also prints the same report every time
+it runs.
 """
+
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # Enable running this file directly (submodules/devenv_utils/stale_worktrees.py):
+    # put the repo root on sys.path and adopt the package identity so the
+    # relative imports below resolve.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    __package__ = "submodules.devenv_utils"
 
 import argparse
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
-from .config import DevenvConfig
+from .config import DevenvConfig, load_config
 from .worktrees import WorktreeEntry, secondary_worktrees
 
 DEFAULT_STALE_DAYS = 7
@@ -98,7 +109,7 @@ def describe(stale: StaleWorktree) -> str:
     # remove a worktree whose submodules are populated -- the normal state
     # here, and the state line above says what --force would discard.
     if branch is not None:
-        removal = f"pr.py abandon {branch}"
+        removal = f"submodules/devenv_utils/pr_flow.py abandon {branch}"
     else:
         removal = f"git worktree remove --force {stale.worktree.path}"
     return (
@@ -141,3 +152,7 @@ def main(cfg: DevenvConfig):
         print(f"No worktrees idle for {args.days:g}+ days.")
         return
     print_stale_report(cfg, args.days)
+
+
+if __name__ == "__main__":
+    main(load_config(Path(__file__).resolve().parents[2]))

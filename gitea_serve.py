@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Provision (on first run) and launch the local Gitea stack used for PR review.
 
 Gitea gives worktree branches a GitHub-style pull-request UI -- diffs, review
@@ -7,9 +8,9 @@ the stack runs inside the dev container, its state lives under
 through the port published by the project's run_docker.py.
 
 One stack serves every consumer project (they share the mount): each project
-registers its own server-side repo, named after DevenvConfig.name. Consumer
-repos expose this module through a thin py/tools/gitea_serve.py shim that
-passes their DevenvConfig.
+registers its own server-side repo, named after DevenvConfig.name. Run this
+module directly from a consumer repo; it reads that repo's devenv.toml (see
+config.load_config).
 
 There is no login step, ever: nginx fronts Gitea on the published port and
 stamps every request with the reverse-proxy auth header, so the browser is
@@ -34,6 +35,16 @@ To reset the instance entirely, stop the servers (`pkill -x gitea`,
 scratch.
 """
 
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # Enable running this file directly (submodules/devenv_utils/gitea_serve.py):
+    # put the repo root on sys.path and adopt the package identity so the
+    # relative imports below resolve.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    __package__ = "submodules.devenv_utils"
+
 import argparse
 import json
 import os
@@ -43,9 +54,8 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-from .config import DevenvConfig
+from .config import DevenvConfig, load_config
 from .instances import INSTANCE_PORT_OFFSET_ENV
 from .stale_worktrees import print_stale_report
 
@@ -391,3 +401,7 @@ def main(cfg: DevenvConfig):
     print(f"Gitea:  http://localhost:{web_port}/{creds['username']}/{cfg.name}")
     print(f"Signed in automatically as {creds['username']}; no login needed.")
     print_stale_report(cfg)
+
+
+if __name__ == "__main__":
+    main(load_config(Path(__file__).resolve().parents[2]))

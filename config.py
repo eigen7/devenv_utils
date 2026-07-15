@@ -4,8 +4,13 @@ A project constructs one of these (typically in its own small config module)
 and hands it to SetupWizardTool and to the standalone run/build scripts. Only
 `name` and `repo_root` are required; everything else derives a sensible default
 from those, and can be overridden per project.
+
+`load_config()` builds one from a repo-root `devenv.toml`, so a generic entry
+point can construct the config from the file's location alone -- without
+importing any project Python.
 """
 
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,3 +96,24 @@ class DevenvConfig:
             self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
+
+
+# devenv.toml keys whose values are paths, resolved relative to the repo root.
+_PATH_FIELDS = frozenset(
+    {"docker_context", "env_json_path", "target_dir", "default_mount_dir", "worktrees_dir"}
+)
+
+
+def load_config(repo_root: Path) -> DevenvConfig:
+    """Build a DevenvConfig from `repo_root`/devenv.toml.
+
+    devenv.toml holds the static DevenvConfig fields as data, so a generic
+    devenv_utils entry point can construct the config knowing only where the
+    file lives -- no project Python to import. Each key maps to a DevenvConfig
+    field; path-valued keys are resolved relative to `repo_root`, and
+    `repo_root` itself always comes from the caller (the file's directory),
+    never from the file.
+    """
+    data = tomllib.loads((repo_root / "devenv.toml").read_text())
+    kwargs = {k: (repo_root / v if k in _PATH_FIELDS else v) for k, v in data.items()}
+    return DevenvConfig(repo_root=repo_root, **kwargs)

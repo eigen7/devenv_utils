@@ -12,12 +12,18 @@ It writes the generic glue (never overwriting an existing file):
     submodules/__init__.py    package marker so `submodules.devenv_utils` imports
     submodules/README.md      pointer to the submodule workflow doc
     py/setup_check.py         import bridge for py/ entrypoints
-    setup_common.py           project config TEMPLATE (fill in)
+    devenv.toml               project config TEMPLATE (fill in)
+    setup_common.py           loads devenv.toml + any project-specific constants
 
-Then: fill in setup_common.py, call `tool.setup_git_config()` in your setup
+The PR-workflow tools need no per-project shim: run them straight from the
+submodule (submodules/devenv_utils/pr_flow.py, gitea_serve.py,
+stale_worktrees.py) -- each reads the project's devenv.toml itself.
+
+Then: fill in devenv.toml, call `tool.setup_git_config()` in your setup
 wizard, and point your CLAUDE.md at submodules/devenv_utils/SUBMODULES.md.
 See CONSUMER_SETUP.md.
 """
+
 import sys
 from pathlib import Path
 
@@ -32,8 +38,7 @@ This file exists so submodule packages can be imported as `submodules.<name>`
 from the repo root. It is a project-owned file, not part of any submodule.
 """
 ''',
-
-    "submodules/README.md": '''\
+    "submodules/README.md": """\
 This directory contains git submodules: full checkouts of repos we control,
 each pinned to a commit. The workflow -- changing a submodule, pointer-bump
 rules, first-clone initialization, worktree interactions -- is documented in
@@ -42,8 +47,7 @@ touching anything under this directory.
 
 A plain `git clone` leaves the submodules empty; the first run of any
 host-side script populates them (see the stanza atop setup_common.py).
-''',
-
+""",
     "py/setup_check.py": '''\
 """Import the repo-root `setup_common` from the py/ entrypoints.
 
@@ -64,13 +68,28 @@ def import_setup_common():
     import setup_common
     return setup_common
 ''',
+    "devenv.toml": """\
+# Declarative devenv configuration, read by submodules/devenv_utils
+# load_config() into a DevenvConfig. Every key is a DevenvConfig field;
+# path-valued keys are resolved relative to this file's directory.
 
+name = "CHANGE_ME"
+
+# Bump to force users to rerun the setup wizard, e.g. after a Dockerfile change
+# that needs an image rebuild (a major -- first-number -- bump also wipes
+# target/).
+setup_version = "1.0.0"
+
+# Ports forwarded host -> container by run_docker.py.
+required_ports = []
+""",
     "setup_common.py": '''\
 """Project-specific devenv configuration for THIS project.
 
 The generic host-side machinery lives in the `submodules/devenv_utils` git
-submodule; this module supplies the project-specific DevenvConfig and
-constants. It lives at the repo root so host-side scripts can import it
+submodule. The static DevenvConfig fields live as data in the repo-root
+`devenv.toml`; this module loads them and is where any project-specific
+constants go. It lives at the repo root so host-side scripts can import it
 without PYTHONPATH.
 """
 
@@ -90,14 +109,9 @@ if not (REPO_ROOT / "submodules" / "devenv_utils" / "__init__.py").exists():
 from submodules.devenv_utils import (  # noqa: E402
     DevenvConfig,
     DevTool,
+    load_config,
     check_setup_version as _check_setup_version,
 )
-
-# Bump to force users to rerun the setup wizard, e.g. after a Dockerfile
-# change that requires an image rebuild (major bump wipes target/).
-SETUP_VERSION = "1.0.0"
-# Ports forwarded host -> container by run_docker.py.
-REQUIRED_PORTS = []
 
 
 def check_setup_version():
@@ -110,13 +124,8 @@ def dev_tool() -> DevTool:
 
 
 def make_config() -> DevenvConfig:
-    """Build the DevenvConfig consumed by every host-side script."""
-    return DevenvConfig(
-        name="CHANGE_ME",
-        repo_root=REPO_ROOT,
-        required_ports=REQUIRED_PORTS,
-        setup_version=SETUP_VERSION,
-    )
+    """The project DevenvConfig, loaded from the repo-root devenv.toml."""
+    return load_config(REPO_ROOT)
 ''',
 }
 
@@ -138,7 +147,7 @@ def main() -> int:
         print(f"  skipped  {rel}  (already exists)")
 
     print("\nNext steps:")
-    print("  1. Fill in setup_common.py (project name, ports, versions).")
+    print("  1. Fill in devenv.toml (project name, ports, versions).")
     print("  2. Call tool.setup_git_config() in your setup wizard so every")
     print("     checkout gets the submodule-sync git settings.")
     print("  3. Point your CLAUDE.md at submodules/devenv_utils/SUBMODULES.md")
