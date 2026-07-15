@@ -26,21 +26,24 @@ restating the rules.
 
 Publish in dependency order: a submodule commit must reach the submodule's
 upstream **before** any superproject commit referencing it is published, or
-other clones cannot fetch it. From the superproject root on the host (where
-upstream credentials live):
+other clones cannot fetch it. This is handled for you by **`git publish`**, run
+on the host (where the GitHub credentials live) after the PRs are merged on
+Gitea:
 
 ```
-python3 submodules/devenv_utils/push_upstream.py
+git publish
 ```
 
-pushes every submodule pointer commit that upstream is missing (plain
-fast-forwards; divergence fails loudly), then prints the superproject push
-command to run next. `push.recurseSubmodules=check` (below) makes git refuse
-any superproject push that would break the order.
+It fast-forwards the local checkout to Gitea's `main`, then pushes each
+submodule pointer commit that GitHub is missing (plain fast-forwards; divergence
+fails loudly) before pushing the superproject -- so the ordering above holds
+automatically. `push.recurseSubmodules=check` (below) is the backstop, and a
+pre-push hook redirects a stray bare `git push` to `git publish`. See
+publish.py.
 
-Coding agents cannot push upstream (credentials live on the host): an agent
-whose change touches a submodule must end by asking the user to run the
-command above, noting that it prints the follow-up superproject push.
+Coding agents cannot publish (credentials live on the host, and `git publish`
+refuses to run in the container): an agent whose change touches a submodule
+ends by asking the user to merge the PRs and run `git publish`.
 
 To update a submodule to its upstream tip without local changes:
 

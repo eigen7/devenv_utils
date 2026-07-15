@@ -47,16 +47,14 @@ if __package__ in (None, ""):
     __package__ = "submodules.devenv_utils"
 
 import argparse
-import base64
 import json
 import secrets
 import shutil
 import subprocess
 import urllib.error
-import urllib.request
 
 from .config import DevenvConfig, load_config
-from .gitea_serve import GITEA_ROOT, ensure_serving
+from .gitea_serve import GITEA_ROOT, api, ensure_serving
 from .worktrees import primary_worktree, worktree_for_branch
 
 CLAUDE_CREDENTIALS_PATH = GITEA_ROOT / "claude_credentials.json"
@@ -67,23 +65,6 @@ CLAUDE_EMAIL = "noreply@anthropic.com"
 
 def run(cmd: list[str], cwd: Path):
     subprocess.run(cmd, check=True, cwd=cwd)
-
-
-def api(method: str, backend_port: int, path: str, creds: dict, payload: dict | None = None):
-    """A Gitea API call against the loopback backend port (plain basic auth,
-    no reverse-proxy header stamping). Returns the decoded JSON response, or
-    None for empty bodies."""
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{backend_port}/api/v1{path}",
-        data=json.dumps(payload).encode() if payload is not None else None,
-        method=method,
-    )
-    auth = base64.b64encode(f"{creds['username']}:{creds['password']}".encode()).decode()
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req) as resp:
-        body = resp.read()
-    return json.loads(body) if body else None
 
 
 def ensure_claude_user(admin: dict, backend_port: int) -> dict:

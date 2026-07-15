@@ -46,6 +46,7 @@ if __package__ in (None, ""):
     __package__ = "submodules.devenv_utils"
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -190,6 +191,23 @@ def gitea_env() -> dict[str, str]:
 
 def run_gitea(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(gitea_cmd(*args), capture_output=True, text=True, env=gitea_env())
+
+
+def api(method: str, backend_port: int, path: str, creds: dict, payload: dict | None = None):
+    """A Gitea API call against the loopback backend port (plain basic auth,
+    no reverse-proxy header stamping). Returns the decoded JSON response, or
+    None for empty bodies."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{backend_port}/api/v1{path}",
+        data=json.dumps(payload).encode() if payload is not None else None,
+        method=method,
+    )
+    auth = base64.b64encode(f"{creds['username']}:{creds['password']}".encode()).decode()
+    req.add_header("Authorization", f"Basic {auth}")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req) as resp:
+        body = resp.read()
+    return json.loads(body) if body else None
 
 
 def http_get_status(url: str) -> int | None:
