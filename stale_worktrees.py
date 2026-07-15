@@ -23,19 +23,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import DevenvConfig
+from .worktrees import WorktreeEntry, secondary_worktrees
 
 DEFAULT_STALE_DAYS = 7
 
 
 @dataclass
-class Worktree:
-    path: Path
-    branch: str | None  # None when the worktree is on a detached HEAD
-
-
-@dataclass
 class StaleWorktree:
-    worktree: Worktree
+    worktree: WorktreeEntry
     last_activity: float  # unix time
     changed_files: int  # uncommitted (staged, unstaged, or untracked) files
     merged: bool  # tip is an ancestor of main
@@ -46,22 +41,6 @@ def git(worktree_path: Path, *args: str) -> str:
         ["git", "-C", str(worktree_path), *args], capture_output=True, text=True, check=True
     )
     return result.stdout
-
-
-def list_worktrees(repo_root: Path) -> list[Worktree]:
-    """Every worktree of the repo except the main checkout."""
-    worktrees = []
-    path, branch = None, None
-    for line in git(repo_root, "worktree", "list", "--porcelain").splitlines() + [""]:
-        if line.startswith("worktree "):
-            path, branch = Path(line.removeprefix("worktree ")), None
-        elif line.startswith("branch refs/heads/"):
-            branch = line.removeprefix("branch refs/heads/")
-        elif not line and path is not None:
-            if path != repo_root:
-                worktrees.append(Worktree(path, branch))
-            path = None
-    return worktrees
 
 
 def changed_files(worktree_path: Path) -> list[Path]:
@@ -96,7 +75,7 @@ def is_merged(worktree_path: Path) -> bool:
 def find_stale_worktrees(repo_root: Path, stale_days: float) -> list[StaleWorktree]:
     cutoff = time.time() - stale_days * 86400
     stale = []
-    for worktree in list_worktrees(repo_root):
+    for worktree in secondary_worktrees(repo_root):
         changed = changed_files(worktree.path)
         activity = last_activity(worktree.path, changed)
         if activity < cutoff:
@@ -106,20 +85,26 @@ def find_stale_worktrees(repo_root: Path, stale_days: float) -> list[StaleWorktr
 
 def describe(stale: StaleWorktree) -> str:
     age_days = int((time.time() - stale.last_activity) / 86400)
-    branch = stale.worktree.branch or "(detached HEAD)"
+    branch = stale.worktree.branch
     if stale.changed_files:
         state = f"{stale.changed_files} uncommitted file(s)"
     elif stale.merged:
         state = "clean, merged into main -- safe to delete"
     else:
         state = "clean, NOT merged into main"
-    # --force unconditionally: git refuses to remove a worktree whose
-    # submodules are populated, which is a worktree's normal state here. The
-    # state line above tells the user what --force would discard.
+    # A branch-backed worktree is torn down (worktree + local branch, even if
+    # unmerged) via the PR workflow tool. A detached-HEAD worktree has no
+    # branch to name, so fall back to raw git; --force because git refuses to
+    # remove a worktree whose submodules are populated -- the normal state
+    # here, and the state line above says what --force would discard.
+    if branch is not None:
+        removal = f"pr.py abandon {branch}"
+    else:
+        removal = f"git worktree remove --force {stale.worktree.path}"
     return (
         f"  {stale.worktree.path}\n"
-        f"    branch {branch}; last activity {age_days} day(s) ago; {state}\n"
-        f"    delete with: git worktree remove --force {stale.worktree.path}"
+        f"    branch {branch or '(detached HEAD)'}; last activity {age_days} day(s) ago; {state}\n"
+        f"    delete with: {removal}"
     )
 
 

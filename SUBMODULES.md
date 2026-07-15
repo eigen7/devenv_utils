@@ -83,4 +83,5 @@ reliable path, with `check` as the guard.)
   those, and a detached pointer commit cannot be fetched by SHA without
   `uploadpack.allowAnySHA1InWant`.
 * `git worktree remove` refuses to remove a worktree containing a populated
-  submodule; pass `--force`.
+  submodule; pass `--force`. pr_flow.py's `merge` and `abandon` subcommands
+  do this for you.
