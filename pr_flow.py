@@ -100,6 +100,22 @@ def ensure_claude_user(admin: dict, backend_port: int) -> dict:
     return creds
 
 
+def gitmodule_entries(root: Path) -> list[tuple[str, str]]:
+    """(name, path) for each submodule declared in root's .gitmodules."""
+    listing = subprocess.run(
+        ["git", "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=root,
+    )
+    entries = []
+    for line in listing.stdout.splitlines():
+        key, path = line.split(" ", 1)
+        entries.append((key.removeprefix("submodule.").removesuffix(".path"), path))
+    return entries
+
+
 def init_submodules(main: Path, worktree: Path):
     """Populate a fresh worktree's submodules from the primary checkout's copies.
 
@@ -111,18 +127,8 @@ def init_submodules(main: Path, worktree: Path):
     commit there.
     """
     run(["git", "submodule", "init"], cwd=worktree)
-    listing = subprocess.run(
-        ["git", "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=worktree,
-    )
-    sub_paths = []
-    for line in listing.stdout.splitlines():
-        key, sub_path = line.split(" ", 1)
-        name = key.removeprefix("submodule.").removesuffix(".path")
-        sub_paths.append(sub_path)
+    entries = gitmodule_entries(worktree)
+    for name, sub_path in entries:
         local_copy = main / sub_path
         run(["git", "config", "uploadpack.allowAnySHA1InWant", "true"], cwd=local_copy)
         run(["git", "config", f"submodule.{name}.url", str(local_copy)], cwd=worktree)
@@ -132,7 +138,7 @@ def init_submodules(main: Path, worktree: Path):
     # The same Claude identity cmd_worktree gives the superproject worktree:
     # editing a submodule in place is part of the documented workflow (see
     # SUBMODULES.md), and its commits belong to the same PR authorship.
-    for sub_path in sub_paths:
+    for _, sub_path in entries:
         run(["git", "config", "user.name", "Claude"], cwd=worktree / sub_path)
         run(["git", "config", "user.email", CLAUDE_EMAIL], cwd=worktree / sub_path)
 
@@ -160,6 +166,55 @@ def delete_remote_branch(backend_port: int, owner: str, name: str, branch: str, 
     except urllib.error.HTTPError as err:
         if err.code != 404:
             raise
+
+
+def submodule_pointer(root: Path, sub_path: str) -> str:
+    """The submodule commit recorded in root's HEAD tree."""
+    entry = subprocess.run(
+        ["git", "ls-tree", "HEAD", sub_path], capture_output=True, text=True, check=True, cwd=root
+    ).stdout.split()
+    return entry[2]
+
+
+def commit_present(repo: Path, sha: str) -> bool:
+    return (
+        subprocess.run(["git", "cat-file", "-e", sha], cwd=repo, capture_output=True).returncode
+        == 0
+    )
+
+
+def has_remote(repo: Path, remote: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "remote", "get-url", remote], cwd=repo, capture_output=True
+        ).returncode
+        == 0
+    )
+
+
+def sync_submodules(main: Path):
+    """Check out each submodule to the pointer recorded in main's HEAD, fetching
+    any missing commit from gitea rather than the submodule's upstream origin.
+
+    At merge time the newly referenced submodule commit is on gitea -- that is
+    where it was reviewed -- but has not necessarily reached the submodule's
+    upstream origin yet; that push is a separate, later host-side step (see
+    SUBMODULES.md). Letting a `submodule.recurse` pull update the submodule
+    would fetch it from origin and fail on such a commit, so cmd_merge pulls
+    without recursing and calls this instead: fetch from gitea when the commit
+    is absent, then check out from the now-local objects.
+    """
+    for _, sub_path in gitmodule_entries(main):
+        sub = main / sub_path
+        if not commit_present(sub, submodule_pointer(main, sub_path)) and has_remote(sub, "gitea"):
+            run(["git", "fetch", "-q", "gitea"], cwd=sub)
+    # protocol.file.allow: inert for the http(s) submodule remotes of a real
+    # primary checkout, but lets file-path remotes (tests) work through the
+    # submodule-context command.
+    run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive"],
+        cwd=main,
+    )
 
 
 def local_branch_exists(main: Path, branch: str) -> bool:
@@ -268,7 +323,11 @@ def cmd_merge(cfg: DevenvConfig, args: argparse.Namespace):
             admin,
             {"Do": "merge"},
         )
-    run(["git", "pull", "--ff-only", "gitea", "main"], cwd=main)
+    # Pull without recursing into submodules; sync_submodules then updates them
+    # from gitea, which serves any freshly referenced submodule commit even
+    # before it reaches the submodule's upstream origin.
+    run(["git", "-c", "submodule.recurse=false", "pull", "--ff-only", "gitea", "main"], cwd=main)
+    sync_submodules(main)
     delete_remote_branch(backend_port, owner, cfg.name, branch, admin)
     teardown_branch(main, branch, force=False)
     print(
