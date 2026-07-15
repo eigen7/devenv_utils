@@ -30,13 +30,19 @@ That writes:
 | `submodules/__init__.py` | package marker so `submodules.devenv_utils` imports |
 | `submodules/README.md` | pointer to [SUBMODULES.md](SUBMODULES.md) |
 | `py/setup_check.py` | bridge to import repo-root `setup_common` from `py/` scripts |
-| `setup_common.py` | **template** — fill in your project name/ports/versions |
+| `devenv.toml` | **template** — fill in your project name/ports/versions |
+| `setup_common.py` | loads `devenv.toml`, plus any project-specific constants |
+
+The PR-workflow tools need no per-project shim: run them straight from the
+submodule (`submodules/devenv_utils/pr_flow.py`, `gitea_serve.py`,
+`stale_worktrees.py`) — each reads the project's `devenv.toml` itself.
 
 Then:
 
-1. Fill in `setup_common.py` (name, `REQUIRED_PORTS`, versions, any project
-   constants). Keep the submodule-populating stanza above its imports: it is
-   what lets a plain `git clone` work without `--recurse-submodules`.
+1. Fill in `devenv.toml` (name, `required_ports`, versions). Add any project
+   constants to `setup_common.py`, and keep its submodule-populating stanza
+   above the imports: it is what lets a plain `git clone` work without
+   `--recurse-submodules`.
 2. Call `tool.setup_git_config()` from your `setup_wizard.py` so every
    checkout gets the submodule-sync git settings (see
    [SUBMODULES.md](SUBMODULES.md)).
@@ -72,12 +78,13 @@ The offset is exported into the container as the `DEVENV_INSTANCE_PORT_OFFSET`
 environment variable (`instances.INSTANCE_PORT_OFFSET_ENV`). **In-container apps
 that bind hard-coded ports must read this variable and add it to their default
 ports**, so they bind the ports that are actually forwarded. This is the only
-project-side code needed — `setup_common.py` is untouched.
+project-side code needed — `devenv.toml` and `setup_common.py` are untouched.
 
 ## What stays project-specific
 
-Only `setup_common.py` (your `DevenvConfig` + project constants), your own
-`setup_wizard.py` / `build.py` entrypoints and their custom steps, and any
+Only `devenv.toml` (your config data) and `setup_common.py` (any project
+constants), your own `setup_wizard.py` / `build.py` entrypoints and their
+custom steps, and any
 in-container app reads of `DEVENV_INSTANCE_PORT_OFFSET` (see "Running
 multiple instances" above). Everything else above is generic and identical
 across consumers.

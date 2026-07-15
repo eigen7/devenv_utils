@@ -1,30 +1,30 @@
+#!/usr/bin/env python3
 """Drive the worktree-and-PR review workflow end to end.
 
 Every change to a consumer repo lands through a pull request on the local
 Gitea instance, which the user reviews from the host browser (see
-gitea_serve.py). Consumer repos expose this module through a thin
-py/tools/pr.py shim that passes their DevenvConfig, so a task is these
-commands:
+gitea_serve.py). Run this module directly from a consumer repo -- it reads that
+repo's devenv.toml (see config.load_config) -- so a task is these commands:
 
-  py/tools/pr.py worktree <branch>
+  submodules/devenv_utils/pr_flow.py worktree <branch>
       New worktree at <worktrees_dir>/<branch> on a new branch <branch>, with
       submodules populated, the primary checkout's .env.json setup stamp copied
       over, and a Claude commit identity, so the PR distinguishes Claude's
       commits from the user's.
 
-  py/tools/pr.py create <branch> --title ... [--body-file ... | --body ...]
+  submodules/devenv_utils/pr_flow.py create <branch> --title ... [--body-file ... | --body ...]
       Start the Gitea stack if needed, push the branch, and open the PR --
       both as the dedicated `claude` Gitea user (provisioned on first use,
       credentials in <mount>/gitea/claude_credentials.json) so Gitea shows
       Claude, not the reviewing admin, as pusher and author. Prints the
       review URL.
 
-  py/tools/pr.py merge <N>
+  submodules/devenv_utils/pr_flow.py merge <N>
       After the user approves: merge the PR (as the admin), fast-forward the
       primary checkout, and delete the branch (local and remote) and its
       worktree. Idempotent: safe to re-run after a partial failure.
 
-  py/tools/pr.py abandon <branch>
+  submodules/devenv_utils/pr_flow.py abandon <branch>
       Tear down a worktree and delete its (possibly unmerged) branch, without
       touching Gitea. For worktrees whose task was dropped mid-flight -- the
       cleanup the stale-worktree report points at.
@@ -32,9 +32,19 @@ commands:
 Every subcommand resolves the primary checkout itself (see
 worktrees.primary_worktree) and runs its git operations there, so it behaves
 identically whether invoked from the primary checkout or from inside a feature
-worktree -- the shim's cfg.repo_root is only a starting anchor, never assumed
-to be the primary checkout.
+worktree -- cfg.repo_root (the invoking checkout) is only a starting anchor,
+never assumed to be the primary checkout.
 """
+
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # Enable running this file directly (submodules/devenv_utils/pr_flow.py):
+    # put the repo root on sys.path and adopt the package identity so the
+    # relative imports below resolve.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    __package__ = "submodules.devenv_utils"
 
 import argparse
 import base64
@@ -44,9 +54,8 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-from .config import DevenvConfig
+from .config import DevenvConfig, load_config
 from .gitea_serve import GITEA_ROOT, ensure_serving
 from .worktrees import primary_worktree, worktree_for_branch
 
@@ -384,3 +393,7 @@ def parse_args() -> argparse.Namespace:
 def main(cfg: DevenvConfig):
     args = parse_args()
     args.func(cfg, args)
+
+
+if __name__ == "__main__":
+    main(load_config(Path(__file__).resolve().parents[2]))
