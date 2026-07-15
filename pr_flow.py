@@ -13,16 +13,11 @@ repo's devenv.toml (see config.load_config) -- so a task is these commands:
       commits from the user's.
 
   submodules/devenv_utils/pr_flow.py create <branch> --title ... [--body-file ... | --body ...]
-      Start the Gitea stack if needed, push the branch, and open the PR --
-      both as the dedicated `claude` Gitea user (provisioned on first use,
-      credentials in <mount>/gitea/claude_credentials.json) so Gitea shows
-      Claude, not the reviewing admin, as pusher and author. Prints the
-      review URL.
-
-  submodules/devenv_utils/pr_flow.py merge <N>
-      After the user approves: merge the PR (as the admin), fast-forward the
-      primary checkout, and delete the branch (local and remote) and its
-      worktree. Idempotent: safe to re-run after a partial failure.
+      Start the Gitea stack if needed, push the branch, and open its PR -- plus
+      a PR in each submodule the branch advances (they merge first) -- as the
+      dedicated `claude` Gitea user (provisioned on first use, credentials in
+      <mount>/gitea/claude_credentials.json) so Gitea shows Claude, not the
+      reviewing admin, as pusher and author. Prints the review + merge handoff.
 
   submodules/devenv_utils/pr_flow.py abandon <branch>
       Tear down a worktree and delete its (possibly unmerged) branch, without
@@ -51,7 +46,7 @@ import json
 import secrets
 import shutil
 import subprocess
-import urllib.error
+import urllib.parse
 
 from .config import DevenvConfig, load_config
 from .gitea_serve import GITEA_ROOT, api, ensure_serving
@@ -148,31 +143,6 @@ def copy_setup_state(main: Path, cfg: DevenvConfig, worktree: Path):
     shutil.copy2(main / rel, worktree / rel)
 
 
-def pr_head_branch(pr: dict) -> str:
-    """The PR's head branch name, robust to the branch already being deleted.
-
-    Gitea reports head.ref as the branch name while it exists but degrades it to
-    'refs/pull/N/head' once the branch is gone (e.g. a web-UI merge, or a re-run
-    after a prior run deleted the remote branch). head.label keeps the original
-    name across that -- 'branch' for a same-repo PR, 'owner:branch' for a fork --
-    so fall back to it and strip any owner prefix.
-    """
-    ref = pr["head"]["ref"]
-    if ref.startswith("refs/pull/"):
-        return pr["head"]["label"].split(":", 1)[-1]
-    return ref
-
-
-def delete_remote_branch(backend_port: int, owner: str, name: str, branch: str, admin: dict):
-    """Delete the PR's remote branch, tolerating its prior deletion so a
-    re-run after a partial failure succeeds."""
-    try:
-        api("DELETE", backend_port, f"/repos/{owner}/{name}/branches/{branch}", admin)
-    except urllib.error.HTTPError as err:
-        if err.code != 404:
-            raise
-
-
 def submodule_pointer(root: Path, sub_path: str) -> str:
     """The submodule commit recorded in root's HEAD tree."""
     entry = subprocess.run(
@@ -185,40 +155,6 @@ def commit_present(repo: Path, sha: str) -> bool:
     return (
         subprocess.run(["git", "cat-file", "-e", sha], cwd=repo, capture_output=True).returncode
         == 0
-    )
-
-
-def has_remote(repo: Path, remote: str) -> bool:
-    return (
-        subprocess.run(
-            ["git", "remote", "get-url", remote], cwd=repo, capture_output=True
-        ).returncode
-        == 0
-    )
-
-
-def sync_submodules(main: Path):
-    """Check out each submodule to the pointer recorded in main's HEAD, fetching
-    any missing commit from gitea rather than the submodule's upstream origin.
-
-    At merge time the newly referenced submodule commit is on gitea -- that is
-    where it was reviewed -- but has not necessarily reached the submodule's
-    upstream origin yet; that push is a separate, later host-side step (see
-    SUBMODULES.md). Letting a `submodule.recurse` pull update the submodule
-    would fetch it from origin and fail on such a commit, so cmd_merge pulls
-    without recursing and calls this instead: fetch from gitea when the commit
-    is absent, then check out from the now-local objects.
-    """
-    for _, sub_path in gitmodule_entries(main):
-        sub = main / sub_path
-        if not commit_present(sub, submodule_pointer(main, sub_path)) and has_remote(sub, "gitea"):
-            run(["git", "fetch", "-q", "gitea"], cwd=sub)
-    # protocol.file.allow: inert for the http(s) submodule remotes of a real
-    # primary checkout, but lets file-path remotes (tests) work through the
-    # submodule-context command.
-    run(
-        ["git", "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive"],
-        cwd=main,
     )
 
 
@@ -275,71 +211,134 @@ def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
     print(f"Worktree ready: {path}")
 
 
+def git_out(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def claude_push_url(backend_port: int, owner: str, repo: str, claude: dict) -> str:
+    """A claude-credentialed push URL (the `gitea` remote embeds the admin's)."""
+    return f"http://{CLAUDE_USER}:{claude['password']}@localhost:{backend_port}/{owner}/{repo}.git"
+
+
+def grant_claude_write(backend_port: int, owner: str, repo: str, admin: dict):
+    """Idempotent; also repairs a claude user that lost repo access."""
+    api(
+        "PUT",
+        backend_port,
+        f"/repos/{owner}/{repo}/collaborators/{CLAUDE_USER}",
+        admin,
+        {"permission": "write"},
+    )
+
+
+def open_pr(backend_port: int, web_port: int, owner: str, repo: str, claude: dict, fields: dict):
+    """Open a PR on `owner/repo`; returns (number, web URL)."""
+    pr = api("POST", backend_port, f"/repos/{owner}/{repo}/pulls", claude, fields)
+    return pr["number"], f"http://localhost:{web_port}/{owner}/{repo}/pulls/{pr['number']}"
+
+
+def gitea_repo_name(sub_dir: Path) -> str:
+    """A submodule's Gitea repo name -- its origin basename (same project)."""
+    return Path(urllib.parse.urlparse(git_out(sub_dir, "remote", "get-url", "origin")).path).stem
+
+
+def open_submodule_prs(
+    worktree: Path, backend_port: int, web_port: int, owner: str, admin: dict, claude: dict, args
+) -> list[tuple[str, int, str]]:
+    """Open a Gitea PR for each submodule this branch advances (they merge first).
+
+    A submodule the branch didn't touch still points at its Gitea main, so it is
+    skipped. Returns (repo, number, url) per opened PR.
+    """
+    opened = []
+    for _, sub_path in gitmodule_entries(worktree):
+        sub = worktree / sub_path
+        head = git_out(sub, "rev-parse", "HEAD")
+        repo = gitea_repo_name(sub)
+        grant_claude_write(backend_port, owner, repo, admin)
+        listing = subprocess.run(
+            ["git", "ls-remote", f"http://localhost:{backend_port}/{owner}/{repo}.git", "main"],
+            cwd=sub,
+            capture_output=True,
+            text=True,
+        )
+        gitea_main = listing.stdout.split()[0] if listing.returncode == 0 and listing.stdout else ""
+        if head == gitea_main:
+            continue
+        run(
+            [
+                "git",
+                "push",
+                claude_push_url(backend_port, owner, repo, claude),
+                f"{head}:refs/heads/{args.branch}",
+            ],
+            cwd=sub,
+        )
+        body = Path(args.body_file).read_text() if args.body_file else args.body
+        number, url = open_pr(
+            backend_port,
+            web_port,
+            owner,
+            repo,
+            claude,
+            {"title": args.title, "head": args.branch, "base": "main", "body": body},
+        )
+        opened.append((repo, number, url))
+    return opened
+
+
+def submodule_pr_note(sub_prs: list[tuple[str, int, str]]) -> str:
+    links = "\n".join(f"- {repo} #{number}: {url}" for repo, number, url in sub_prs)
+    return f"\n\n---\nSubmodule PR(s), merge first:\n{links}\n"
+
+
+def print_handoff(sub_prs: list[tuple[str, int, str]], repo: str, number: int, url: str):
+    print("\nReview + merge on Gitea (submodule PR(s) first), then `git publish` on the host:")
+    for sub_repo, sub_number, sub_url in sub_prs:
+        print(f"  {sub_repo} #{sub_number}: {sub_url}")
+    print(f"  {repo} #{number}: {url}")
+    print("Merge each on its page, or in the container: gitea_merge.py <repo> <N>.")
+
+
 def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
     admin, web_port, backend_port = ensure_serving(cfg)
     owner = admin["username"]
     claude = ensure_claude_user(admin, backend_port)
-    # Idempotent; also repairs a claude user that lost repo access.
-    api(
-        "PUT",
-        backend_port,
-        f"/repos/{owner}/{cfg.name}/collaborators/{CLAUDE_USER}",
-        admin,
-        {"permission": "write"},
+
+    # A coordinated change has a PR in each touched submodule too; open those
+    # first (they merge first) and cross-reference them from the consumer PR.
+    worktree = worktree_for_branch(main, args.branch)
+    sub_prs = (
+        open_submodule_prs(worktree, backend_port, web_port, owner, admin, claude, args)
+        if worktree is not None
+        else []
     )
 
-    # The `gitea` remote embeds the admin's credentials, so the push goes
-    # through an explicit claude-credentialed URL instead. Pushing from the
-    # primary checkout also satisfies push.recurseSubmodules=check: its
-    # submodule clones carry the gitea remote-tracking refs a worktree's
+    grant_claude_write(backend_port, owner, cfg.name, admin)
+    # Pushing from the primary checkout satisfies push.recurseSubmodules=check:
+    # its submodule clones carry the gitea remote-tracking refs a worktree's
     # freshly file-cloned submodules lack.
-    push_url = (
-        f"http://{CLAUDE_USER}:{claude['password']}@localhost:{backend_port}/{owner}/{cfg.name}.git"
+    run(
+        ["git", "push", claude_push_url(backend_port, owner, cfg.name, claude), args.branch],
+        cwd=main,
     )
-    run(["git", "push", push_url, args.branch], cwd=main)
 
     body = Path(args.body_file).read_text() if args.body_file else args.body
-    pr = api(
-        "POST",
+    if sub_prs:
+        body += submodule_pr_note(sub_prs)
+    number, url = open_pr(
         backend_port,
-        f"/repos/{owner}/{cfg.name}/pulls",
+        web_port,
+        owner,
+        cfg.name,
         claude,
         {"title": args.title, "head": args.branch, "base": "main", "body": body},
     )
-    print(
-        f"PR #{pr['number']}: http://localhost:{web_port}/{owner}/{cfg.name}/pulls/{pr['number']}"
-    )
-
-
-def cmd_merge(cfg: DevenvConfig, args: argparse.Namespace):
-    main = primary_worktree(cfg.repo_root)
-    print(f"Primary checkout: {main}")
-    admin, _, backend_port = ensure_serving(cfg)
-    owner = admin["username"]
-    pr = api("GET", backend_port, f"/repos/{owner}/{cfg.name}/pulls/{args.number}", admin)
-    branch = pr_head_branch(pr)
-    # Each step below is idempotent, so a re-run after a partial failure -- or a
-    # merge already done in the web UI -- completes the cleanup rather than
-    # erroring.
-    if not pr["merged"]:
-        api(
-            "POST",
-            backend_port,
-            f"/repos/{owner}/{cfg.name}/pulls/{args.number}/merge",
-            admin,
-            {"Do": "merge"},
-        )
-    # Pull without recursing into submodules; sync_submodules then updates them
-    # from gitea, which serves any freshly referenced submodule commit even
-    # before it reaches the submodule's upstream origin.
-    run(["git", "-c", "submodule.recurse=false", "pull", "--ff-only", "gitea", "main"], cwd=main)
-    sync_submodules(main)
-    delete_remote_branch(backend_port, owner, cfg.name, branch, admin)
-    removed = teardown_branch(main, branch, force=False)
-    cleanup = "worktree removed" if removed else "no local worktree to remove"
-    print(f"PR #{args.number} ({branch}) merged; primary checkout fast-forwarded, {cleanup}.")
+    print_handoff(sub_prs, cfg.name, number, url)
 
 
 def cmd_abandon(cfg: DevenvConfig, args: argparse.Namespace):
@@ -366,19 +365,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("branch", help="branch (and worktree directory) name")
     p.set_defaults(func=cmd_worktree)
 
-    p = sub.add_parser("create", help="push a branch and open its PR as the claude user")
+    p = sub.add_parser("create", help="push a branch and open its PR(s) as the claude user")
     p.add_argument("branch", help="branch to push and open a PR for")
     p.add_argument("--title", required=True, help="PR title")
     body = p.add_mutually_exclusive_group()
     body.add_argument("--body-file", help="file holding the PR description (markdown)")
     body.add_argument("--body", default="", help="inline PR description")
     p.set_defaults(func=cmd_create)
-
-    p = sub.add_parser(
-        "merge", help="merge an approved PR, fast-forward main, clean up branch + worktree"
-    )
-    p.add_argument("number", type=int, help="PR number")
-    p.set_defaults(func=cmd_merge)
 
     p = sub.add_parser(
         "abandon", help="tear down a worktree and delete its branch (local only, no Gitea)"
