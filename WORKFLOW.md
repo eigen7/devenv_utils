@@ -1,8 +1,13 @@
 # Worktree → PR → publish workflow
 
+> **Audience: the coding agent.** These are instructions for the agent driving
+> changes in a consumer repo — a consumer's `CLAUDE.md` links here instead of
+> restating them. Human maintainers want [README.md](README.md), which explains
+> the same workflow from your side (review + `git publish`).
+
 The canonical workflow for landing a change in a repo that uses devenv_utils.
-Consumer `CLAUDE.md` files link here instead of restating it. Submodule-specific
-rules (pointer bumps, publishing order) live in [SUBMODULES.md](SUBMODULES.md).
+Submodule-specific rules (pointer bumps, publishing order) live in
+[SUBMODULES.md](SUBMODULES.md).
 
 Unless told otherwise, never make changes directly in the main checkout
 (`/workspace/repo`). Work in a git worktree and submit the result as a pull
