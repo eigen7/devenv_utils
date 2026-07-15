@@ -3,12 +3,12 @@
 Every change to a consumer repo lands through a pull request on the local
 Gitea instance, which the user reviews from the host browser (see
 gitea_serve.py). Consumer repos expose this module through a thin
-py/tools/pr.py shim that passes their DevenvConfig, so a task is three
+py/tools/pr.py shim that passes their DevenvConfig, so a task is these
 commands:
 
   py/tools/pr.py worktree <branch>
       New worktree at <worktrees_dir>/<branch> on a new branch <branch>, with
-      submodules populated, the main checkout's .env.json setup stamp copied
+      submodules populated, the primary checkout's .env.json setup stamp copied
       over, and a Claude commit identity, so the PR distinguishes Claude's
       commits from the user's.
 
@@ -21,8 +21,19 @@ commands:
 
   py/tools/pr.py merge <N>
       After the user approves: merge the PR (as the admin), fast-forward the
-      main checkout, and delete the branch (local and remote) and its
-      worktree.
+      primary checkout, and delete the branch (local and remote) and its
+      worktree. Idempotent: safe to re-run after a partial failure.
+
+  py/tools/pr.py abandon <branch>
+      Tear down a worktree and delete its (possibly unmerged) branch, without
+      touching Gitea. For worktrees whose task was dropped mid-flight -- the
+      cleanup the stale-worktree report points at.
+
+Every subcommand resolves the primary checkout itself (see
+worktrees.primary_worktree) and runs its git operations there, so it behaves
+identically whether invoked from the primary checkout or from inside a feature
+worktree -- the shim's cfg.repo_root is only a starting anchor, never assumed
+to be the primary checkout.
 """
 
 import argparse
@@ -31,11 +42,13 @@ import json
 import secrets
 import shutil
 import subprocess
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 from .config import DevenvConfig
 from .gitea_serve import GITEA_ROOT, ensure_serving
+from .worktrees import primary_worktree, worktree_for_branch
 
 CLAUDE_CREDENTIALS_PATH = GITEA_ROOT / "claude_credentials.json"
 CLAUDE_USER = "claude"
@@ -87,14 +100,14 @@ def ensure_claude_user(admin: dict, backend_port: int) -> dict:
     return creds
 
 
-def init_submodules(cfg: DevenvConfig, worktree: Path):
-    """Populate a fresh worktree's submodules from the main checkout's copies.
+def init_submodules(main: Path, worktree: Path):
+    """Populate a fresh worktree's submodules from the primary checkout's copies.
 
     Cloning from the real upstream can fail: a submodule pointer may reference
-    a commit that so far exists only in the main checkout (submodule commits
+    a commit that so far exists only in the primary checkout (submodule commits
     are pushed upstream by the user, possibly after the pointer bump lands;
-    see SUBMODULES.md). The main checkout always has the commit, so clone from
-    it -- allowing direct-SHA fetch, since the pointer may be a detached
+    see SUBMODULES.md). The primary checkout always has the commit, so clone
+    from it -- allowing direct-SHA fetch, since the pointer may be a detached
     commit there.
     """
     run(["git", "submodule", "init"], cwd=worktree)
@@ -110,11 +123,11 @@ def init_submodules(cfg: DevenvConfig, worktree: Path):
         key, sub_path = line.split(" ", 1)
         name = key.removeprefix("submodule.").removesuffix(".path")
         sub_paths.append(sub_path)
-        local_copy = cfg.repo_root / sub_path
+        local_copy = main / sub_path
         run(["git", "config", "uploadpack.allowAnySHA1InWant", "true"], cwd=local_copy)
         run(["git", "config", f"submodule.{name}.url", str(local_copy)], cwd=worktree)
     # protocol.file.allow: git blocks file-path submodule clones by default
-    # (CVE-2022-39253 hardening); the main checkout is trusted.
+    # (CVE-2022-39253 hardening); the primary checkout is trusted.
     run(["git", "-c", "protocol.file.allow=always", "submodule", "update"], cwd=worktree)
     # The same Claude identity cmd_worktree gives the superproject worktree:
     # editing a submodule in place is part of the documented workflow (see
@@ -124,53 +137,85 @@ def init_submodules(cfg: DevenvConfig, worktree: Path):
         run(["git", "config", "user.email", CLAUDE_EMAIL], cwd=worktree / sub_path)
 
 
-def copy_setup_state(cfg: DevenvConfig, worktree: Path):
-    """Copy the main checkout's .env.json into a fresh worktree.
+def copy_setup_state(main: Path, cfg: DevenvConfig, worktree: Path):
+    """Copy the primary checkout's .env.json into a fresh worktree.
 
     The file is untracked per-checkout state: the setup wizard's version stamp
     (which every entry point gates on via check_setup_version) plus any env
     mappings the wizard recorded. A worktree without it refuses to build until
-    the wizard is re-run, yet the main checkout's completed setup already
+    the wizard is re-run, yet the primary checkout's completed setup already
     covers it -- both checkouts live in the same container and share the same
     machine-level provisioning -- so the stamp is copied rather than
     re-earned.
     """
     rel = cfg.env_json_path.relative_to(cfg.repo_root)
-    shutil.copy2(cfg.env_json_path, worktree / rel)
+    shutil.copy2(main / rel, worktree / rel)
 
 
-def worktree_path_for(cfg: DevenvConfig, branch: str) -> Path | None:
-    """The path of the worktree that has `branch` checked out, if any."""
-    listing = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=cfg.repo_root,
+def delete_remote_branch(backend_port: int, owner: str, name: str, branch: str, admin: dict):
+    """Delete the PR's remote branch, tolerating its prior deletion so a
+    re-run after a partial failure succeeds."""
+    try:
+        api("DELETE", backend_port, f"/repos/{owner}/{name}/branches/{branch}", admin)
+    except urllib.error.HTTPError as err:
+        if err.code != 404:
+            raise
+
+
+def local_branch_exists(main: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main
     )
-    path = None
-    for line in listing.stdout.splitlines():
-        if line.startswith("worktree "):
-            path = Path(line.removeprefix("worktree "))
-        elif line == f"branch refs/heads/{branch}" and path != Path(cfg.repo_root):
-            return path
-    return None
+    return result.returncode == 0
+
+
+def delete_local_branch(main: Path, branch: str, *, force: bool):
+    """Delete `branch` in the primary checkout, tolerating its prior absence.
+
+    Idempotent so a re-run reaches the same end state. `force` selects -D
+    (discard even if unmerged) over -d (refuse to drop unmerged work).
+    """
+    flag = "-D" if force else "-d"
+    result = subprocess.run(
+        ["git", "branch", flag, branch], cwd=main, capture_output=True, text=True
+    )
+    if result.returncode and "not found" not in result.stderr:
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
+
+
+def teardown_branch(main: Path, branch: str, *, force: bool):
+    """Remove `branch`'s worktree (if any), then delete the branch.
+
+    Order matters: git refuses to delete a branch that is checked out in a
+    live worktree, so the worktree goes first. Both steps are idempotent.
+    """
+    worktree = worktree_for_branch(main, branch)
+    if worktree is not None:
+        # --force: git refuses to remove a worktree with populated submodules.
+        run(["git", "worktree", "remove", "--force", str(worktree)], cwd=main)
+    delete_local_branch(main, branch, force=force)
 
 
 def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
+    main = primary_worktree(cfg.repo_root)
+    print(f"Primary checkout: {main}")
     path = cfg.worktrees_dir / args.branch
-    run(["git", "worktree", "add", str(path), "-b", args.branch], cwd=cfg.repo_root)
-    # Worktrees don't inherit the main checkout's submodules or its untracked
+    run(["git", "worktree", "add", str(path), "-b", args.branch], cwd=main)
+    # Worktrees don't inherit the primary checkout's submodules or its untracked
     # setup stamp.
-    init_submodules(cfg, path)
-    copy_setup_state(cfg, path)
-    run(["git", "config", "extensions.worktreeConfig", "true"], cwd=cfg.repo_root)
+    init_submodules(main, path)
+    copy_setup_state(main, cfg, path)
+    run(["git", "config", "extensions.worktreeConfig", "true"], cwd=main)
     run(["git", "config", "--worktree", "user.name", "Claude"], cwd=path)
     run(["git", "config", "--worktree", "user.email", CLAUDE_EMAIL], cwd=path)
     print(f"Worktree ready: {path}")
 
 
 def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
+    main = primary_worktree(cfg.repo_root)
+    print(f"Primary checkout: {main}")
     admin, web_port, backend_port = ensure_serving(cfg)
     owner = admin["username"]
     claude = ensure_claude_user(admin, backend_port)
@@ -184,11 +229,14 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     )
 
     # The `gitea` remote embeds the admin's credentials, so the push goes
-    # through an explicit claude-credentialed URL instead.
+    # through an explicit claude-credentialed URL instead. Pushing from the
+    # primary checkout also satisfies push.recurseSubmodules=check: its
+    # submodule clones carry the gitea remote-tracking refs a worktree's
+    # freshly file-cloned submodules lack.
     push_url = (
         f"http://{CLAUDE_USER}:{claude['password']}@localhost:{backend_port}/{owner}/{cfg.name}.git"
     )
-    run(["git", "push", push_url, args.branch], cwd=cfg.repo_root)
+    run(["git", "push", push_url, args.branch], cwd=main)
 
     body = Path(args.body_file).read_text() if args.body_file else args.body
     pr = api(
@@ -204,11 +252,14 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
 
 
 def cmd_merge(cfg: DevenvConfig, args: argparse.Namespace):
+    main = primary_worktree(cfg.repo_root)
+    print(f"Primary checkout: {main}")
     admin, _, backend_port = ensure_serving(cfg)
     owner = admin["username"]
     pr = api("GET", backend_port, f"/repos/{owner}/{cfg.name}/pulls/{args.number}", admin)
     branch = pr["head"]["ref"]
-    # Skipped when re-run after a partial failure below.
+    # Each step below is idempotent, so a re-run after a partial failure
+    # completes the cleanup rather than erroring.
     if not pr["merged"]:
         api(
             "POST",
@@ -217,14 +268,25 @@ def cmd_merge(cfg: DevenvConfig, args: argparse.Namespace):
             admin,
             {"Do": "merge"},
         )
-    run(["git", "pull", "--ff-only", "gitea", "main"], cwd=cfg.repo_root)
-    api("DELETE", backend_port, f"/repos/{owner}/{cfg.name}/branches/{branch}", admin)
-    worktree = worktree_path_for(cfg, branch)
-    if worktree is not None:
-        # --force: git refuses to remove a worktree whose submodule is populated.
-        run(["git", "worktree", "remove", "--force", str(worktree)], cwd=cfg.repo_root)
-    run(["git", "branch", "-d", branch], cwd=cfg.repo_root)
-    print(f"PR #{args.number} ({branch}) merged; main checkout fast-forwarded, worktree removed.")
+    run(["git", "pull", "--ff-only", "gitea", "main"], cwd=main)
+    delete_remote_branch(backend_port, owner, cfg.name, branch, admin)
+    teardown_branch(main, branch, force=False)
+    print(
+        f"PR #{args.number} ({branch}) merged; primary checkout fast-forwarded, worktree removed."
+    )
+
+
+def cmd_abandon(cfg: DevenvConfig, args: argparse.Namespace):
+    main = primary_worktree(cfg.repo_root)
+    print(f"Primary checkout: {main}")
+    branch = args.branch
+    if worktree_for_branch(main, branch) is None and not local_branch_exists(main, branch):
+        print(f"No worktree or branch named {branch}; nothing to abandon.")
+        return
+    # force=True: an abandoned branch is typically unmerged, and the user has
+    # deliberately chosen to discard it (see the stale-worktree report).
+    teardown_branch(main, branch, force=True)
+    print(f"Abandoned {branch}: worktree removed and branch deleted.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -250,6 +312,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("number", type=int, help="PR number")
     p.set_defaults(func=cmd_merge)
+
+    p = sub.add_parser(
+        "abandon", help="tear down a worktree and delete its branch (local only, no Gitea)"
+    )
+    p.add_argument("branch", help="branch whose worktree + local branch to remove")
+    p.set_defaults(func=cmd_abandon)
 
     return parser.parse_args()
 
