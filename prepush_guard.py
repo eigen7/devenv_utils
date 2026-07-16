@@ -6,14 +6,16 @@ fast-forwards the local checkout and cleans up merged worktrees. A bare
 `git push` to origin is caught here in the two ways it goes wrong:
 
   - run inside the container, where the origin credentials don't live, or
-  - run while Gitea's `main` is ahead of the local `main` -- a browser-merge
-    that hasn't been published. A bare push would be a silent no-op (the merge
-    commit isn't local yet), stranding the merge on Gitea.
+  - run while the local `main` and Gitea's `main` disagree. Gitea ahead means
+    an unpublished browser-merge: a bare push would be a silent no-op (the
+    merge commit isn't local yet), stranding the merge on Gitea. Local ahead
+    means a commit made directly on `main` that bypassed Gitea: pushing it to
+    origin would leave Gitea behind the published history.
 
-Either way the hook stops the push and points at `git publish`. Pushes to any
-other remote -- notably Gitea, the normal in-container path -- pass through
-untouched. git invokes the hook with the remote name as argv[1] and its URL as
-argv[2].
+Either way the hook stops the push and prints the way out, matched to the
+direction of the mismatch. Pushes to any other remote -- notably Gitea, the
+normal in-container path -- pass through untouched. git invokes the hook with
+the remote name as argv[1] and its URL as argv[2].
 """
 
 import sys
@@ -26,7 +28,7 @@ if __package__ in (None, ""):
 import subprocess
 
 from .config import DevenvConfig, load_config
-from .publish import gitea_read_url
+from .publish import DIVERGED_ADVICE, LOCAL_AHEAD_ADVICE, gitea_read_url, main_relationship
 from .state import in_docker_container
 
 
@@ -55,14 +57,18 @@ def main(cfg: DevenvConfig):
         )
         return
     gitea_main = probe.stdout.split()[0] if probe.stdout.strip() else ""
-    local_main = subprocess.run(
-        ["git", "rev-parse", "main"], cwd=root, capture_output=True, text=True
-    ).stdout.strip()
-    if gitea_main and gitea_main != local_main:
+    if not gitea_main:
+        return
+    relation = main_relationship(root, gitea_main)
+    if relation == "behind":
         sys.exit(
             "Gitea's main has merged commits your local main doesn't have yet.\n"
             "Run `git publish` -- it fast-forwards, publishes to origin, and cleans up."
         )
+    if relation == "ahead":
+        sys.exit(LOCAL_AHEAD_ADVICE)
+    if relation == "diverged":
+        sys.exit(DIVERGED_ADVICE)
 
 
 if __name__ == "__main__":

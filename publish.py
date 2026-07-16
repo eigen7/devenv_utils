@@ -82,11 +82,45 @@ def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
     )
 
 
+LOCAL_AHEAD_ADVICE = (
+    "Local main has commits that Gitea's main lacks. main advances through Gitea,\n"
+    "so sync it first: `git push gitea main`, then run `git publish`."
+)
+
+DIVERGED_ADVICE = (
+    "Local main and Gitea's main have diverged: each has commits the other lacks.\n"
+    "Reconcile them by hand, then run `git publish`."
+)
+
+
+def main_relationship(repo_root: Path, gitea_main: str) -> str:
+    """How the local `main` relates to Gitea's `main` tip: 'equal', 'behind'
+    (Gitea has commits local main lacks), 'ahead' (local main has commits Gitea
+    lacks), or 'diverged'. A tip commit absent from the local repo counts as
+    'behind': the local branch cannot contain a commit it has never seen."""
+    if gitea_main == git_out(repo_root, "rev-parse", "main"):
+        return "equal"
+    if not commit_present(repo_root, gitea_main) or is_ancestor(repo_root, "main", gitea_main):
+        return "behind"
+    if is_ancestor(repo_root, gitea_main, "main"):
+        return "ahead"
+    return "diverged"
+
+
 def fast_forward_main(repo_root: Path):
-    """Fast-forward the local `main` to Gitea's `main`."""
+    """Fast-forward the local `main` to Gitea's `main`.
+
+    Publishing flows Gitea -> local -> GitHub, so a local `main` that is ahead
+    of or diverged from Gitea's cannot be fast-forwarded; refuse with the way
+    to reconcile instead of letting `git merge`/`git push` fail obscurely."""
     if git_out(repo_root, "branch", "--show-current") != "main":
         raise SystemExit("git publish must run on `main`; check it out first.")
     git(repo_root, "fetch", gitea_read_url(repo_root), "main")
+    relation = main_relationship(repo_root, git_out(repo_root, "rev-parse", "FETCH_HEAD"))
+    if relation == "ahead":
+        raise SystemExit(LOCAL_AHEAD_ADVICE)
+    if relation == "diverged":
+        raise SystemExit(DIVERGED_ADVICE)
     git(repo_root, "merge", "--ff-only", "FETCH_HEAD")
 
 
