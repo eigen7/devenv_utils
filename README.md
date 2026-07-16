@@ -5,6 +5,13 @@ several projects as a git submodule: container setup/build/run, a local Gitea
 instance for pull-request review, and a git-worktree-per-task PR workflow that
 coding agents drive.
 
+On the Docker side, every consumer gets the same three thin entry points —
+`setup_wizard.py` (interactive first-time setup), `build_docker_image.py`, and
+`run_docker.py` — scaffolded once and driven by a declarative `devenv.toml`;
+they build and launch a dev container with the checkout bind-mounted, ports
+forwarded, and a `devuser` matching your host UID/GID. The rest of this page
+is about the worktree/PR workflow that runs on top of that container.
+
 This README is for **humans** — how you review and land the changes an agent
 produces. The agent-facing instructions live in [WORKFLOW.md](WORKFLOW.md);
 setting up a new project is [CONSUMER_SETUP.md](CONSUMER_SETUP.md).

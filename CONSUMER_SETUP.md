@@ -32,6 +32,9 @@ That writes:
 | `py/setup_check.py` | bridge to import repo-root `setup_common` from `py/` scripts |
 | `devenv.toml` | **template** — fill in your project name/ports/versions |
 | `setup_common.py` | loads `devenv.toml`, plus any project-specific constants |
+| `setup_wizard.py` | interactive first-time setup — extend its `SetupWizard` class with custom steps |
+| `build_docker_image.py` | builds the local Docker image from `docker-setup/` |
+| `run_docker.py` | launches (or attaches to) the dev container |
 
 The PR-workflow tools need no per-project shim: run them straight from the
 submodule (`submodules/devenv_utils/pr_flow.py`, `gitea_serve.py`,
@@ -43,10 +46,15 @@ Then:
    constants to `setup_common.py`, and keep its submodule-populating stanza
    above the imports: it is what lets a plain `git clone` work without
    `--recurse-submodules`.
-2. Call `tool.setup_git_config()` from your `setup_wizard.py` so every
-   checkout gets the submodule-sync git settings (see
-   [SUBMODULES.md](SUBMODULES.md)).
-3. Give your `CLAUDE.md` a short "Git submodules" section that links to
+2. Write `docker-setup/Dockerfile` — the image `setup_wizard.py` builds and
+   `run_docker.py` runs (crib from an existing consumer).
+3. Add any project-specific steps (data downloads, credential templates, ...)
+   to `setup_wizard.py`'s `SetupWizard` class, then run `./setup_wizard.py`.
+   The scaffolded wizard already covers the generic steps, including
+   `setup_git_config()` — the submodule-sync git settings every checkout
+   needs (see [SUBMODULES.md](SUBMODULES.md)). GPU projects should add the
+   NVIDIA steps (`setup_cdi()`, `validate_nvidia_installation()`).
+4. Give your `CLAUDE.md` a short "Git submodules" section that links to
    `submodules/devenv_utils/SUBMODULES.md`, so coding agents follow the
    submodule workflow without each repo restating it.
 
@@ -82,9 +90,8 @@ project-side code needed — `devenv.toml` and `setup_common.py` are untouched.
 
 ## What stays project-specific
 
-Only `devenv.toml` (your config data) and `setup_common.py` (any project
-constants), your own `setup_wizard.py` / `build.py` entrypoints and their
-custom steps, and any
-in-container app reads of `DEVENV_INSTANCE_PORT_OFFSET` (see "Running
-multiple instances" above). Everything else above is generic and identical
-across consumers.
+Only `devenv.toml` (your config data), `setup_common.py` (any project
+constants), `docker-setup/Dockerfile`, the custom steps on `setup_wizard.py`'s
+`SetupWizard` class, and any in-container app reads of
+`DEVENV_INSTANCE_PORT_OFFSET` (see "Running multiple instances" above).
+Everything else above is generic and identical across consumers.
