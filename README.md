@@ -1,22 +1,27 @@
 # devenv_utils
 
-Reusable machinery for a Docker-based development environment, shared across
-several projects as a git submodule: container setup/build/run, a local Gitea
-instance for pull-request review, and a git-worktree-per-task PR workflow that
-coding agents drive.
-
-On the Docker side, every consumer gets the same three thin entry points —
-`setup_wizard.py` (interactive first-time setup), `build_docker_image.py`, and
-`run_docker.py` — scaffolded once and driven by a declarative `devenv.toml`;
-they build and launch a dev container with the checkout bind-mounted, ports
-forwarded, and a `devuser` matching your host UID/GID. The rest of this page
-is about the worktree/PR workflow that runs on top of that container.
+Reusable machinery for a Docker-based, AI-agent-compatible development
+workflow. Each project pulls it in as a git submodule.
 
 This README is for **humans** — how you review and land the changes an agent
 produces. The agent-facing instructions live in [WORKFLOW.md](WORKFLOW.md);
 setting up a new project is [CONSUMER_SETUP.md](CONSUMER_SETUP.md).
 
 ## Why this machinery exists
+
+### Docker
+
+You want your project development environment to work the same everywhere:
+on your laptop, on your friend's desktop, and on a cloud server. Docker is a
+good way to ensure that.
+
+But Docker has some stress points, such as producing the right "docker run"
+command (mount-points, port-forwarding, propagating the host machine's
+IDE/Claude settings, file-permissions, and more).
+
+`devenv_utils` provides tooling to set all this up for you.
+
+### Coding agents: worktrees, pull requests, submodules
 
 Coding agents (Claude Code and friends) work best on an isolated checkout: a
 **git worktree** per task lets an agent build, test, and commit a change without
@@ -33,7 +38,19 @@ publishing a change that spans a submodule must push the submodule commit to its
 upstream *before* the superproject that points at it. The tooling handles all of
 that, so day to day you don't think about it.
 
-## The workflow, from your side
+## The development workflow, from your side
+
+The first time, you run `./setup_wizard.py`. This walks you through one-time
+setup and builds the Docker image.
+
+After that, you start a development session by running `./run_docker.py`. This
+launches a Docker container and lands you inside of it, like an ssh session
+into a virtual machine.
+
+You launch your IDE, and connect to that Docker container. You can then interact
+with your AI agent through your IDE, or through a CLI interface launched from
+the container. Your agent sessions and IDE state are preserved across container
+restarts: they live on directories mounted from the host.
 
 You interact with the agent much as you would a colleague; the machinery stays
 mostly invisible. A typical change:
@@ -56,8 +73,7 @@ plain `git push` has nothing to send and would silently do nothing. And for a
 submodule-spanning change, only `git publish` gets the push ordering right. So
 you don't get caught by the silent no-op, a **pre-push hook redirects a stray
 `git push` to `git publish`** whenever a merge is waiting to be published. (The
-hook is installed when you run the project's setup wizard — see
-[CONSUMER_SETUP.md](CONSUMER_SETUP.md) — not automatically on clone.)
+hook is installed by `./setup_wizard.py`, not automatically on clone.)
 
 ## Docs
 
