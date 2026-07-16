@@ -217,9 +217,22 @@ def git_out(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def push_url(backend_port: int, owner: str, repo: str, user: str, password: str) -> str:
+    """An authenticated backend-port push URL for a server-side repo."""
+    return f"http://{user}:{password}@localhost:{backend_port}/{owner}/{repo}.git"
+
+
 def claude_push_url(backend_port: int, owner: str, repo: str, claude: dict) -> str:
     """A claude-credentialed push URL (the `gitea` remote embeds the admin's)."""
-    return f"http://{CLAUDE_USER}:{claude['password']}@localhost:{backend_port}/{owner}/{repo}.git"
+    return push_url(backend_port, owner, repo, CLAUDE_USER, claude["password"])
+
+
+def seed_repo_main(backend_port: int, owner: str, repo: str, admin: dict, sub: Path, base: str):
+    """Give a submodule's server-side repo a `main` at commit `base`, creating
+    the repo itself through Gitea's push-to-create (ENABLE_PUSH_CREATE_USER).
+    `base` is the published state a PR should diff against."""
+    url = push_url(backend_port, owner, repo, admin["username"], admin["password"])
+    run(["git", "push", url, f"{base}:refs/heads/main"], cwd=sub)
 
 
 def grant_claude_write(backend_port: int, owner: str, repo: str, admin: dict):
@@ -245,19 +258,28 @@ def gitea_repo_name(sub_dir: Path) -> str:
 
 
 def open_submodule_prs(
-    worktree: Path, backend_port: int, web_port: int, owner: str, admin: dict, claude: dict, args
+    primary: Path,
+    worktree: Path,
+    backend_port: int,
+    web_port: int,
+    owner: str,
+    admin: dict,
+    claude: dict,
+    args,
 ) -> list[tuple[str, int, str]]:
     """Open a Gitea PR for each submodule this branch advances (they merge first).
 
     A submodule the branch didn't touch still points at its Gitea main, so it is
-    skipped. Returns (repo, number, url) per opened PR.
+    skipped. A submodule repo the server doesn't have yet (or one with no `main`)
+    is seeded first, with `main` at the pointer the primary checkout's HEAD
+    records -- the published base a PR should diff against. Returns
+    (repo, number, url) per opened PR.
     """
     opened = []
     for _, sub_path in gitmodule_entries(worktree):
         sub = worktree / sub_path
         head = git_out(sub, "rev-parse", "HEAD")
         repo = gitea_repo_name(sub)
-        grant_claude_write(backend_port, owner, repo, admin)
         listing = subprocess.run(
             ["git", "ls-remote", f"http://localhost:{backend_port}/{owner}/{repo}.git", "main"],
             cwd=sub,
@@ -265,8 +287,12 @@ def open_submodule_prs(
             text=True,
         )
         gitea_main = listing.stdout.split()[0] if listing.returncode == 0 and listing.stdout else ""
+        if not gitea_main:
+            gitea_main = submodule_pointer(primary, sub_path)
+            seed_repo_main(backend_port, owner, repo, admin, sub, gitea_main)
         if head == gitea_main:
             continue
+        grant_claude_write(backend_port, owner, repo, admin)
         run(
             [
                 "git",
@@ -313,7 +339,7 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     # first (they merge first) and cross-reference them from the consumer PR.
     worktree = worktree_for_branch(main, args.branch)
     sub_prs = (
-        open_submodule_prs(worktree, backend_port, web_port, owner, admin, claude, args)
+        open_submodule_prs(main, worktree, backend_port, web_port, owner, admin, claude, args)
         if worktree is not None
         else []
     )

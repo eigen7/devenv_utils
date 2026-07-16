@@ -14,14 +14,16 @@ It writes the generic glue (never overwriting an existing file):
     py/setup_check.py         import bridge for py/ entrypoints
     devenv.toml               project config TEMPLATE (fill in)
     setup_common.py           loads devenv.toml + any project-specific constants
+    setup_wizard.py           interactive first-time setup (extend with custom steps)
+    build_docker_image.py     builds the local Docker image
+    run_docker.py             launches (or attaches to) the dev container
 
 The PR-workflow tools need no per-project shim: run them straight from the
 submodule (submodules/devenv_utils/pr_flow.py, gitea_serve.py,
 stale_worktrees.py) -- each reads the project's devenv.toml itself.
 
-Then: fill in devenv.toml, call `tool.setup_git_config()` in your setup
-wizard, and point your CLAUDE.md at submodules/devenv_utils/SUBMODULES.md.
-See CONSUMER_SETUP.md.
+Then: fill in devenv.toml, write docker-setup/Dockerfile, and point your
+CLAUDE.md at submodules/devenv_utils/SUBMODULES.md. See CONSUMER_SETUP.md.
 """
 
 import sys
@@ -127,7 +129,153 @@ def make_config() -> DevenvConfig:
     """The project DevenvConfig, loaded from the repo-root devenv.toml."""
     return load_config(REPO_ROOT)
 ''',
+    "setup_wizard.py": '''\
+#!/usr/bin/env python3
+"""Interactive first-time setup for this project.
+
+Run this *outside* the Docker container. It:
+  1. Applies the git settings that keep the checkouts under submodules/ in
+     sync (see submodules/devenv_utils/SUBMODULES.md).
+  2. Picks the persistent host directory bind-mounted at /workspace/mount.
+  3. Verifies you can run `docker` without sudo, on a new enough daemon.
+  4. Writes a per-container VS Code config so that "Dev Containers: Attach
+     to Running Container" connects as devuser instead of root.
+  5. Pre-trusts the container workspace paths in the host Claude Code config.
+  6. Builds the Docker image.
+
+The generic steps live in `submodules/devenv_utils`; project-specific steps
+belong on the SetupWizard subclass below.
+
+Re-run the wizard any time you want to refresh the VS Code attach config or
+rebuild the image.
+"""
+
+import argparse
+import os
+import sys
+
+from setup_common import make_config
+from submodules.devenv_utils import (
+    SetupException,
+    SetupWizardTool,
+    in_docker_container,
+    print_green,
+)
+
+
+class SetupWizard(SetupWizardTool):
+    """Project-specific setup on top of the generic SetupWizardTool steps.
+
+    Add a method here per custom step (fetching data files, writing
+    credential templates, ...) and call it from main() between the generic
+    steps, with tool.rule() separators.
+    """
+
+
+def get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    return parser.parse_args()
+
+
+def main():
+    assert not in_docker_container(), (
+        "setup_wizard.py is intended to be run on the host, not inside the container."
+    )
+    get_args()  # for --help
+
+    config = make_config()
+    os.chdir(config.repo_root)
+    tool = SetupWizard(config)
+
+    print("*" * 78)
+    print(f"{config.name} setup wizard")
+    print("*" * 78)
+
+    try:
+        tool.rm_target_on_major_bump()
+        tool.rule()
+        tool.setup_git_config()
+        tool.rule()
+        tool.setup_mount_dir()
+        tool.rule()
+        tool.validate_docker_permissions()
+        tool.rule()
+        tool.validate_docker_version()
+        tool.rule()
+        tool.setup_vscode_attach_config()
+        tool.rule()
+        tool.setup_claude_trust()
+        tool.rule()
+        # Project-specific steps (methods on SetupWizard above) go here.
+        tool.build_docker_image()
+        tool.rule()
+        # Stamp the setup version last, so it records only a fully completed
+        # run. The entrypoints check this before doing any work.
+        tool.commit()
+        print_green("Setup complete.")
+        print("Next: ./run_docker.py")
+    except KeyboardInterrupt:
+        print()
+        print("Setup wizard interrupted. Re-run when ready.")
+        sys.exit(1)
+    except SetupException as e:
+        for arg in e.args:
+            print("*" * 78)
+            print(arg)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+''',
+    "build_docker_image.py": '''\
+#!/usr/bin/env python3
+"""Build the local Docker image from docker-setup/ (devenv.toml docker_context)."""
+
+from setup_common import check_setup_version, make_config
+from submodules.devenv_utils import docker_build
+
+
+def main():
+    check_setup_version()
+    docker_build(make_config())
+
+
+if __name__ == "__main__":
+    main()
+''',
+    "run_docker.py": '''\
+#!/usr/bin/env python3
+"""Launch (or attach to) the dev container.
+
+All launch machinery (repo bind-mount, the persistent /workspace/mount host
+directory, UID/GID mapping, port publishing, exec-into-running) lives in
+submodules/devenv_utils, driven by the repo-root devenv.toml. Drops you into
+a bash shell inside the container as `devuser`, whose UID/GID match your host
+user, so files written into the bind-mounts are owned by you on the host.
+
+Document here anything project-specific about the mounts and ports (what the
+persistent mount holds, which services the forwarded ports serve).
+"""
+
+from setup_common import check_setup_version, make_config
+from submodules.devenv_utils import docker_launch
+
+
+def main():
+    check_setup_version()
+    docker_launch(make_config())
+
+
+if __name__ == "__main__":
+    main()
+''',
 }
+
+# Entry points meant to be run as ./<script>; chmod'd executable when written.
+_EXECUTABLE = {"setup_wizard.py", "build_docker_image.py", "run_docker.py"}
 
 
 def main() -> int:
@@ -139,6 +287,8 @@ def main() -> int:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+        if rel in _EXECUTABLE:
+            path.chmod(0o755)
         wrote.append(rel)
 
     for rel in wrote:
@@ -148,11 +298,13 @@ def main() -> int:
 
     print("\nNext steps:")
     print("  1. Fill in devenv.toml (project name, ports, versions).")
-    print("  2. Call tool.setup_git_config() in your setup wizard so every")
-    print("     checkout gets the submodule-sync git settings.")
-    print("  3. Point your CLAUDE.md at submodules/devenv_utils/SUBMODULES.md")
+    print("  2. Write docker-setup/Dockerfile, the image setup_wizard.py builds")
+    print("     (crib from an existing consumer).")
+    print("  3. Add any project-specific steps to setup_wizard.py's SetupWizard")
+    print("     class, then run ./setup_wizard.py.")
+    print("  4. Point your CLAUDE.md at submodules/devenv_utils/SUBMODULES.md")
     print("     (a short 'Git submodules' section with a link suffices).")
-    print("  4. Commit. See submodules/devenv_utils/CONSUMER_SETUP.md for details.")
+    print("  5. Commit. See submodules/devenv_utils/CONSUMER_SETUP.md for details.")
     return 0
 
 
