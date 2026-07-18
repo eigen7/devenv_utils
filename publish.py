@@ -37,7 +37,7 @@ import subprocess
 import urllib.parse
 
 from .config import DevenvConfig, load_config
-from .gitea_client import gitmodule_entries
+from .gitea_client import REMOTE_NAME, gitmodule_entries
 from .pr_flow import commit_present, submodule_pointer
 from .state import in_docker_container
 from .worktrees import secondary_worktrees
@@ -58,12 +58,14 @@ def gitea_read_url(repo_root: Path, sub_path: str = "") -> str:
 
     Derived from the parent's `gitea` remote -- always present, as the review
     remote. That remote holds the canonical credential-free web-port URL
-    (see gitea_client.py), which resolves on the host as-is. A submodule's
-    Gitea repo lives under the same owner, named after its GitHub origin (the
-    same project), so it needs no `gitea` remote of its own -- which a fresh
-    submodule clone lacks.
+    (see gitea_client.py), which resolves on the host as-is. Read from raw
+    config rather than `git remote get-url`, which would bake in the caller's
+    insteadOf rewrites (in a dev container, the canonical URL rewrites to the
+    service-container form). A submodule's Gitea repo lives under the same
+    owner, named after its GitHub origin (the same project), so it needs no
+    `gitea` remote of its own -- which a fresh submodule clone lacks.
     """
-    parent = urllib.parse.urlparse(git_out(repo_root, "remote", "get-url", "gitea"))
+    parent = urllib.parse.urlparse(git_out(repo_root, "config", f"remote.{REMOTE_NAME}.url"))
     if not sub_path:
         return parent.geturl()
     base = f"{parent.scheme}://{parent.netloc}"
@@ -83,13 +85,17 @@ def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
 
 
 LOCAL_AHEAD_ADVICE = (
-    "Local main has commits that Gitea's main lacks. main advances through Gitea,\n"
-    "so sync it first: `git push gitea main`, then run `git publish`."
+    "Local main has commits that Gitea's main lacks. Run `git publish` -- it\n"
+    "syncs Gitea's main automatically before publishing."
 )
 
 DIVERGED_ADVICE = (
     "Local main and Gitea's main have diverged: each has commits the other lacks.\n"
-    "Reconcile them by hand, then run `git publish`."
+    "Reconcile, then re-run `git publish`:\n"
+    "  - if your local-only main commits are NOT on GitHub origin yet:\n"
+    "      git pull --rebase gitea main && git push gitea main\n"
+    "  - if they already reached GitHub (rewriting them would break origin):\n"
+    "      git pull --no-rebase gitea main && git push gitea main"
 )
 
 
@@ -108,20 +114,25 @@ def main_relationship(repo_root: Path, gitea_main: str) -> str:
 
 
 def fast_forward_main(repo_root: Path):
-    """Fast-forward the local `main` to Gitea's `main`.
+    """Bring the local `main` and Gitea's `main` to the same tip.
 
-    Publishing flows Gitea -> local -> GitHub, so a local `main` that is ahead
-    of or diverged from Gitea's cannot be fast-forwarded; refuse with the way
-    to reconcile instead of letting `git merge`/`git push` fail obscurely."""
+    Publishing flows Gitea -> local -> GitHub. The normal case fast-forwards
+    the local `main` to Gitea's. A local `main` that is *ahead* (a direct
+    commit whose commit_guard mirror push didn't land, e.g. the service was
+    down) is a guaranteed fast-forward for Gitea, so it is synced here rather
+    than bounced back to the user. Divergence is the one state that needs a
+    human: refuse with the reconciliation recipes."""
     if git_out(repo_root, "branch", "--show-current") != "main":
         raise SystemExit("git publish must run on `main`; check it out first.")
     git(repo_root, "fetch", gitea_read_url(repo_root), "main")
     relation = main_relationship(repo_root, git_out(repo_root, "rev-parse", "FETCH_HEAD"))
-    if relation == "ahead":
-        raise SystemExit(LOCAL_AHEAD_ADVICE)
     if relation == "diverged":
         raise SystemExit(DIVERGED_ADVICE)
-    git(repo_root, "merge", "--ff-only", "FETCH_HEAD")
+    if relation == "ahead":
+        print("Local main is ahead of Gitea's; syncing Gitea first...")
+        git(repo_root, "push", REMOTE_NAME, "main")
+    else:
+        git(repo_root, "merge", "--ff-only", "FETCH_HEAD")
 
 
 def sync_submodule(repo_root: Path, sub_path: str):

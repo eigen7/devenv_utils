@@ -28,6 +28,7 @@ if __package__ in (None, ""):
 import subprocess
 
 from .config import DevenvConfig, load_config
+from .gitea_client import SERVICE_CONTAINER
 from .publish import DIVERGED_ADVICE, LOCAL_AHEAD_ADVICE, gitea_read_url, main_relationship
 from .state import in_docker_container
 
@@ -51,11 +52,15 @@ def main(cfg: DevenvConfig):
         ["git", "ls-remote", gitea_read_url(root), "main"], cwd=root, capture_output=True, text=True
     )
     if probe.returncode != 0:
-        print(
-            "warning: could not reach Gitea to check for unpublished merges; allowing push.",
-            file=sys.stderr,
+        # Fail closed: pushing to GitHub around an unreachable Gitea is how a
+        # commit lands on origin that Gitea has never seen -- the diverged
+        # state that cannot be rebased away afterwards.
+        sys.exit(
+            "Could not reach Gitea, so there is no way to check for unpublished\n"
+            "merges; this push to GitHub origin is blocked. Start the service --\n"
+            f"`docker start {SERVICE_CONTAINER}` on the host -- and retry, or push\n"
+            "anyway, deliberately, with `git push --no-verify`."
         )
-        return
     gitea_main = probe.stdout.split()[0] if probe.stdout.strip() else ""
     if not gitea_main:
         return

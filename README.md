@@ -73,8 +73,31 @@ advances Gitea's copy — the merge commit isn't in your local checkout yet, so 
 plain `git push` has nothing to send and would silently do nothing. And for a
 submodule-spanning change, only `git publish` gets the push ordering right. So
 you don't get caught by the silent no-op, a **pre-push hook redirects a stray
-`git push` to `git publish`** whenever a merge is waiting to be published. (The
-hook is installed by `./setup_wizard.py`, not automatically on clone.)
+`git push` to `git publish`** whenever a merge is waiting to be published — and
+blocks the push outright when Gitea is unreachable, since publishing around
+Gitea is how histories diverge (`git push --no-verify` bypasses deliberately).
+(The hooks are installed by `./setup_wizard.py`, not automatically on clone.)
+
+## Committing directly on main
+
+You don't have to route every change through a PR — a quick tweak committed
+straight to `main` is fully supported. Hooks installed by the wizard keep the
+two `main`s in lockstep so the PR flow and direct commits can't drift apart
+(see commit_guard.py):
+
+- Each commit or merge on `main` is **automatically mirrored to Gitea**
+  (`git push gitea main`, printed as `mirrored main -> gitea`). This touches
+  only the local review service, never GitHub.
+- A commit on `main` is **refused while Gitea holds merges you haven't
+  published yet** — your change is still safely uncommitted at that point;
+  run `git publish`, then commit. `git commit --no-verify` bypasses.
+- `git publish` handles the leftover case itself: if a mirror push didn't
+  land (say, the service was down), publish syncs Gitea before publishing.
+
+One consequence: avoid `git commit --amend` / history rewrites on `main` —
+the tip is already mirrored, so the next mirror push will refuse and tell you
+how to reconcile. Feature branches and worktrees are untouched by all of
+this.
 
 ## Docs
 

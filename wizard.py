@@ -72,6 +72,18 @@ class SetupWizardTool:
 
     # ---- Step: git config -----------------------------------------------
 
+    # Git hooks installed into the repo's shared hooks directory:
+    # hook name -> (devenv_utils script, extra args appended to the exec line).
+    # prepush_guard.py steers a stray `git push` to GitHub origin back to
+    # `git publish`; commit_guard.py keeps direct commits on `main` in
+    # lockstep with Gitea (see its docstring).
+    GIT_HOOKS = {
+        "pre-push": ("prepush_guard.py", ' "$@"'),
+        "pre-commit": ("commit_guard.py", " pre-commit"),
+        "post-commit": ("commit_guard.py", " post-commit"),
+        "post-merge": ("commit_guard.py", " post-merge"),
+    }
+
     def setup_git_config(self):
         """Apply the git settings the workflow depends on (SUBMODULES.md).
 
@@ -83,11 +95,12 @@ class SetupWizardTool:
           remote, which would break every other clone.
         - alias.publish: `git publish` runs publish.py (the host-side publish
           step).
-        - a pre-push hook (prepush_guard.py) that steers a stray `git push` to
-          GitHub origin back to `git publish`.
+        - the GIT_HOOKS guards: the pre-push origin guard, and the
+          pre/post-commit + post-merge hooks that keep direct `main` commits
+          in lockstep with Gitea.
 
         Clears core.hooksPath so git uses the repo's default hooks directory,
-        where the pre-push hook is installed.
+        where the hooks are installed.
         """
         repo_root = self.config.repo_root
         publish = '!"$(git rev-parse --show-toplevel)"/submodules/devenv_utils/publish.py'
@@ -98,12 +111,18 @@ class SetupWizardTool:
         ]:
             subprocess.run(["git", "config", key, value], cwd=repo_root, check=True)
         subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo_root, check=False)
-        self._install_pre_push_hook(repo_root)
-        print_green("Configured git for submodule syncing, `git publish`, and the push guard.")
+        self._install_git_hooks(repo_root)
+        print_green("Configured git for submodule syncing, `git publish`, and the workflow hooks.")
 
-    @staticmethod
-    def _install_pre_push_hook(repo_root: Path):
-        """Install the pre-push guard into the repo's shared hooks directory."""
+    @classmethod
+    def _install_git_hooks(cls, repo_root: Path):
+        """Write each GIT_HOOKS entry into the repo's shared hooks directory.
+
+        The hooks directory is shared by every worktree, and each hook resolves
+        the devenv_utils script through its own worktree's checkout -- so a
+        worktree whose pinned devenv_utils predates a given script must be
+        tolerated: the hook no-ops when the script doesn't exist there.
+        """
         common_dir = subprocess.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
             cwd=repo_root,
@@ -111,14 +130,17 @@ class SetupWizardTool:
             text=True,
             check=True,
         ).stdout.strip()
-        hook = Path(common_dir) / "hooks" / "pre-push"
-        hook.parent.mkdir(parents=True, exist_ok=True)
-        hook.write_text(
-            "#!/bin/sh\n"
-            'exec "$(git rev-parse --show-toplevel)"'
-            '/submodules/devenv_utils/prepush_guard.py "$@"\n'
-        )
-        hook.chmod(0o755)
+        hooks_dir = Path(common_dir) / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        for name, (script, args) in cls.GIT_HOOKS.items():
+            hook = hooks_dir / name
+            hook.write_text(
+                "#!/bin/sh\n"
+                f'tool="$(git rev-parse --show-toplevel)/submodules/devenv_utils/{script}"\n'
+                '[ -x "$tool" ] || exit 0\n'
+                f'exec "$tool"{args}\n'
+            )
+            hook.chmod(0o755)
 
     # ---- Step: Gitea service -------------------------------------------
 
