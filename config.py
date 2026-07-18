@@ -36,13 +36,12 @@ def _coerce_service(value) -> Service:
     already-built Service -- into a Service."""
     if isinstance(value, Service):
         return value
-    if isinstance(value, bool):
-        raise ValueError(f"service value {value!r} must be an int port or a {{port, publish}} table")
-    if isinstance(value, int):
+    # bool is an int subclass, so reject it before the int branch below.
+    if isinstance(value, int) and not isinstance(value, bool):
         return Service(port=value)
     if isinstance(value, dict):
         return Service(port=value["port"], publish=value.get("publish", False))
-    raise ValueError(f"service value {value!r} must be an int port or a {{port, publish}} table")
+    raise ValueError(f"service value {value!r} must be an int port or {{port, publish}} table")
 
 
 def _validate_dns_label(kind: str, value: str):
