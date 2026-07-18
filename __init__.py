@@ -29,14 +29,6 @@ from .docker_ops import (
     run_container,
 )
 from .download import download, have
-from .instances import (
-    INSTANCE_ENV_KEY,
-    INSTANCE_PORT_OFFSET_ENV,
-    assert_no_port_conflicts,
-    instance_number,
-    instanced_name,
-    port_offset,
-)
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import (
     get_env_json,
@@ -76,12 +68,6 @@ __all__ = [
     "run_container",
     "download",
     "have",
-    "INSTANCE_ENV_KEY",
-    "INSTANCE_PORT_OFFSET_ENV",
-    "assert_no_port_conflicts",
-    "instance_number",
-    "instanced_name",
-    "port_offset",
     "setup_cdi",
     "validate_nvidia_driver",
     "validate_nvidia_installation",

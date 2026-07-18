@@ -11,6 +11,7 @@ import os
 import sys
 from typing import Callable, Optional
 
+from . import gateway_service
 from .config import DevenvConfig
 from .console import SetupException
 from .docker_ops import (
@@ -20,12 +21,6 @@ from .docker_ops import (
     run_container,
 )
 from .gitea_service import dev_container_args
-from .instances import (
-    assert_no_port_conflicts,
-    instance_number,
-    instanced_name,
-    port_offset,
-)
 from .state import get_env_json, in_docker_container, is_subpath
 
 
@@ -57,10 +52,9 @@ def docker_launch(
 ):
     """Launch (or attach to) the project's dev container. Entry point for run scripts.
 
-    The "INSTANCE" key in .env.json (default 0) selects a parallel instance:
-    instance N gets its own container name and forwards its ports shifted up by
-    instance_port_stride * N, so a second clone of the repo can run a container
-    alongside the first. See instances.py.
+    Each service in the project's `[services]` table is routed by the gateway at
+    http://<project>-<service>.localhost; the service -> URL table is printed at
+    every launch and attach (see GATEWAY.md).
 
     Hooks for project-specific behavior:
       extend_parser(parser): add project CLI flags before parsing.
@@ -71,15 +65,13 @@ def docker_launch(
         already-running container.
     """
     env = get_env_json(config.env_json_path)
-    instance = instance_number(env)
 
     parser = argparse.ArgumentParser(
         description=f"Launch (or attach to) the {config.name} dev container."
     )
     parser.add_argument("-d", "--docker-image",
                         help=f"image to run (default: {config.image})")
-    parser.add_argument("-i", "--instance-name",
-                        default=instanced_name(config.instance_name, instance),
+    parser.add_argument("-i", "--instance-name", default=config.instance_name,
                         help="container name (default: %(default)s)")
     if extend_parser is not None:
         extend_parser(parser)
@@ -87,29 +79,42 @@ def docker_launch(
 
     if is_container_running(args.instance_name):
         print(f"Container {args.instance_name} already running; exec'ing in.")
+        # The container's network mode is fixed at its original launch, and the
+        # gateway routes are attached then too; here we only reprint the table.
+        _print_service_urls(config, "--network=host" in config.extra_docker_args)
         exec_into_running(args.instance_name, config.remote_user)
         return
 
-    _launch_fresh(config, args, env, instance, pre_launch)
+    _launch_fresh(config, args, env, pre_launch)
+
+
+def _print_service_urls(config: DevenvConfig, host_network: bool):
+    """Print the aligned service -> URL table (nothing when the project declares
+    no services). Exits on a gateway wiring error, like the launch path."""
+    try:
+        urls = gateway_service.launch_urls(config, host_network)
+    except SetupException as e:
+        print(e)
+        sys.exit(1)
+    if not urls:
+        return
+    width = max(len(name) for name in urls)
+    print("Service URLs:")
+    for name, url in urls.items():
+        line = f"  {name.ljust(width)}  {url}"
+        service = config.services[name]
+        if service.publish and not host_network:
+            line += f"  (also published at 127.0.0.1:{service.port})"
+        print(line)
 
 
 def _launch_fresh(
     config: DevenvConfig,
     args: argparse.Namespace,
     env: dict,
-    instance: int,
     pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
 ):
     image = args.docker_image or env.get("DOCKER_IMAGE") or config.image
-
-    try:
-        assert_no_port_conflicts(
-            config.required_ports, instance, config.instance_port_stride
-        )
-    except SetupException as e:
-        print(e)
-        sys.exit(1)
-    offset = port_offset(instance, config.instance_port_stride)
 
     mount_dir = None
     if config.container_mount_path is not None:
@@ -125,17 +130,21 @@ def _launch_fresh(
 
     extra_args = pre_launch(args) if pre_launch is not None else []
 
-    # Wire the dev container up to the Gitea service (network membership, env
-    # contract, credentials mount) -- and start the service if it is stopped.
+    # Wire the dev container up to the shared services -- and start them if they
+    # are stopped: the Gitea service (network membership, env contract,
+    # credentials mount) and the gateway (routing labels, published ports, and
+    # DEVENV_SERVICE_URL_* env derived from the [services] table).
     host_network = "--network=host" in config.extra_docker_args + extra_args
     try:
         extra_args = extra_args + dev_container_args(host_network)
+        extra_args = extra_args + gateway_service.dev_container_args(config, host_network)
     except SetupException as e:
         print(e)
         sys.exit(1)
 
+    _print_service_urls(config, host_network)
+
     run_container(
         config, image=image, instance_name=args.instance_name,
-        mount_dir=mount_dir, extra_args=extra_args, port_offset=offset,
-        instance=instance
+        mount_dir=mount_dir, extra_args=extra_args,
     )

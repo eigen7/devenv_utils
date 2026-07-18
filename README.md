@@ -16,8 +16,9 @@ on your laptop, on your friend's desktop, and on a cloud server. Docker is a
 good way to ensure that.
 
 But Docker has some stress points, such as producing the right "docker run"
-command (mount-points, port-forwarding, propagating the host machine's
-IDE/Claude settings, file-permissions, and more).
+command (mount-points, exposing dev servers to the host browser via hostname
+routing through the gateway, propagating the host machine's IDE/Claude
+settings, file-permissions, and more).
 
 `devenv_utils` provides tooling to set all this up for you.
 

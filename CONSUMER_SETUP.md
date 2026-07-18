@@ -30,7 +30,7 @@ That writes:
 | `submodules/__init__.py` | package marker so `submodules.devenv_utils` imports |
 | `submodules/README.md` | pointer to [SUBMODULES.md](SUBMODULES.md) |
 | `py/setup_check.py` | bridge to import repo-root `setup_common` from `py/` scripts |
-| `devenv.toml` | **template** — fill in your project name/ports/versions |
+| `devenv.toml` | **template** — fill in your project name, `[services]`, versions |
 | `setup_common.py` | loads `devenv.toml`, plus any project-specific constants |
 | `setup_wizard.py` | interactive first-time setup — extend its `SetupWizard` class with custom steps |
 | `build_docker_image.py` | builds the local Docker image from `docker-setup/` |
@@ -45,7 +45,7 @@ provisioned by the wizard's `setup_gitea_service()` step — see
 
 Then:
 
-1. Fill in `devenv.toml` (name, `required_ports`, versions). Add any project
+1. Fill in `devenv.toml` (name, `[services]`, versions). Add any project
    constants to `setup_common.py`, and keep its submodule-populating stanza
    above the imports: it is what lets a plain `git clone` work without
    `--recurse-submodules`.
@@ -75,29 +75,24 @@ git -C submodules/devenv_utils pull origin main
 git add submodules/devenv_utils
 ```
 
-## Running multiple instances in parallel
+## Parallel work and exposing dev servers
 
-To run dev containers from two clones of the same repo at once (e.g. two
-independent agent sessions on separate working trees), set `"INSTANCE": N` in
-the second clone's `.env.json` (default 0). `docker_launch` then, for instance
-N:
+Running several tasks at once does not need parallel containers: the PR
+workflow's `pr_flow.py` worktrees (many branches checked out under one mount,
+one dev container) cover that. A single container serves every worktree.
 
-- names the container `<instance_name>_N` (so the second launch starts a new
-  container instead of exec'ing into the first), and
-- shifts every `required_ports` entry up by `instance_port_stride * N` (stride
-  defaults to 100, override via `DevenvConfig`), aborting with a clear error if
-  that would collide with an instance 0..N-1.
-
-The offset is exported into the container as the `DEVENV_INSTANCE_PORT_OFFSET`
-environment variable (`instances.INSTANCE_PORT_OFFSET_ENV`). **In-container apps
-that bind hard-coded ports must read this variable and add it to their default
-ports**, so they bind the ports that are actually forwarded. This is the only
-project-side code needed — `devenv.toml` and `setup_common.py` are untouched.
+Exposing a project's dev servers to the host browser is the `[services]` table
+plus the gateway. Each entry — `name = <container port>`, or the table form
+`name = { port = <p>, publish = true }` for a raw-TCP service that also needs a
+loopback host port — is routed by the machine-wide gateway at
+`http://<project>-<name>.localhost`, so ports stay inside the container and
+never clash across projects. `run_docker.py` prints the service → URL table at
+every launch. See [GATEWAY.md](GATEWAY.md); a server behind the gateway only
+needs to bind `0.0.0.0` (not loopback) and accept its `.localhost` hostname.
 
 ## What stays project-specific
 
-Only `devenv.toml` (your config data), `setup_common.py` (any project
-constants), `docker-setup/Dockerfile`, the custom steps on `setup_wizard.py`'s
-`SetupWizard` class, and any in-container app reads of
-`DEVENV_INSTANCE_PORT_OFFSET` (see "Running multiple instances" above).
-Everything else above is generic and identical across consumers.
+Only `devenv.toml` (your config data, including `[services]`),
+`setup_common.py` (any project constants), `docker-setup/Dockerfile`, and the
+custom steps on `setup_wizard.py`'s `SetupWizard` class. Everything else above
+is generic and identical across consumers.

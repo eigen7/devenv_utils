@@ -82,8 +82,12 @@ name = "CHANGE_ME"
 # target/).
 setup_version = "1.0.0"
 
-# Ports forwarded host -> container by run_docker.py.
-required_ports = []
+# HTTP services run_docker.py should route through the gateway, as
+# http://<name>-<service>.localhost (see submodules/devenv_utils/GATEWAY.md).
+# Each value is a container port, or {port, publish} to also publish
+# 127.0.0.1:<port> for non-HTTP traffic.
+# [services]
+# web = 5173
 """,
     "setup_common.py": '''\
 """Project-specific devenv configuration for THIS project.
@@ -140,10 +144,13 @@ Run this *outside* the Docker container. It:
   3. Verifies you can run `docker` without sudo, on a new enough daemon.
   4. Provisions the machine-wide Gitea PR-review service and registers this
      repo on it (see submodules/devenv_utils/GITEA.md).
-  5. Writes a per-container VS Code config so that "Dev Containers: Attach
+  5. Provisions the machine-wide gateway service that routes each project's
+     http://<project>-<service>.localhost dev URLs (see
+     submodules/devenv_utils/GATEWAY.md).
+  6. Writes a per-container VS Code config so that "Dev Containers: Attach
      to Running Container" connects as devuser instead of root.
-  6. Pre-trusts the container workspace paths in the host Claude Code config.
-  7. Builds the Docker image.
+  7. Pre-trusts the container workspace paths in the host Claude Code config.
+  8. Builds the Docker image.
 
 The generic steps live in `submodules/devenv_utils`; project-specific steps
 belong on the SetupWizard subclass below.
@@ -208,6 +215,8 @@ def main():
         tool.rule()
         tool.setup_gitea_service()
         tool.rule()
+        tool.setup_gateway_service()
+        tool.rule()
         tool.setup_vscode_attach_config()
         tool.rule()
         tool.setup_claude_trust()
@@ -255,13 +264,16 @@ if __name__ == "__main__":
 """Launch (or attach to) the dev container.
 
 All launch machinery (repo bind-mount, the persistent /workspace/mount host
-directory, UID/GID mapping, port publishing, exec-into-running) lives in
+directory, UID/GID mapping, service wiring, exec-into-running) lives in
 submodules/devenv_utils, driven by the repo-root devenv.toml. Drops you into
 a bash shell inside the container as `devuser`, whose UID/GID match your host
 user, so files written into the bind-mounts are owned by you on the host.
 
-Document here anything project-specific about the mounts and ports (what the
-persistent mount holds, which services the forwarded ports serve).
+Each service in devenv.toml's [services] table is reached through the gateway
+at http://<project>-<service>.localhost; the launcher prints the service -> URL
+table (see submodules/devenv_utils/GATEWAY.md). Document here anything
+project-specific about the mounts and services (what the persistent mount holds,
+what each service is).
 """
 
 from setup_common import check_setup_version, make_config
