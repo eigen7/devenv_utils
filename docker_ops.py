@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .console import SetupException
-from .instances import INSTANCE_PORT_OFFSET_ENV
 
 # Shared shell scripts bundled with this package, overlaid into every build
 # context so a project Dockerfile can `COPY entrypoint.sh` / `COPY
@@ -204,38 +203,28 @@ def run_container(
     instance_name: str,
     mount_dir: Optional[str] = None,
     extra_args: Optional[list] = None,
-    port_offset: int = 0,
-    instance: int = 0,
 ):
     """`docker run` a fresh container for `config`, dropping into a shell.
 
-    Bind-mounts the repo (and the mount dir, if the project uses one),
-    forwards the configured ports, and passes the host UID/GID plus the
-    workspace path so the container's entrypoint can reconcile ownership and
-    the per-user setup can cd correctly. `extra_args` (from the project's
-    pre-launch hook) are appended after the config's static extra_docker_args.
-
-    `port_offset` shifts every forwarded port up by that amount (for parallel
-    instances) and is exported as DEVENV_INSTANCE_PORT_OFFSET so in-container
-    apps bind the matching ports.
+    Bind-mounts the repo (and the mount dir, if the project uses one) and passes
+    the host UID/GID plus the workspace path so the container's entrypoint can
+    reconcile ownership and the per-user setup can cd correctly. `extra_args`
+    (from the project's pre-launch hook, plus the service-wiring args) are
+    appended after the config's static extra_docker_args; any port publishing a
+    project needs comes through there.
     """
     uid = subprocess.check_output(["id", "-u"], text=True).strip()
     gid = subprocess.check_output(["id", "-g"], text=True).strip()
-
-    hostname = config.container_hostname
-    if instance > 0:
-        hostname = f"{hostname}-{instance}"
 
     cmd = [
         "docker", "run", "--rm", "-it",
     ] + gpu_docker_args() + [
         "--name", instance_name,
-        "--hostname", hostname,
+        "--hostname", config.container_hostname,
         "-e", f"HOST_UID={uid}",
         "-e", f"HOST_GID={gid}",
         "-e", f"USERNAME={config.remote_user}",
         "-e", f"DEVENV_WORKSPACE={config.container_repo_path}",
-        "-e", f"{INSTANCE_PORT_OFFSET_ENV}={port_offset}",
         "-v", f"{config.repo_root}:{config.container_repo_path}",
     ]
     if config.container_mount_path is not None:
@@ -245,11 +234,6 @@ def run_container(
     cmd += config.extra_docker_args
     if extra_args:
         cmd += extra_args
-    # Port mappings are meaningless (and ignored) under --network=host.
-    if "--network=host" not in cmd:
-        for port in config.required_ports:
-            mapped = port + port_offset
-            cmd += ["-p", f"{mapped}:{mapped}"]
     cmd += [image, "bash"]
 
     _run_with_tmux_rename(cmd)

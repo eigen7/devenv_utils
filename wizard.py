@@ -22,6 +22,7 @@ from .docker_ops import (
     is_version_ok,
     major_version,
 )
+from .gateway_service import wizard_setup as gateway_wizard_setup
 from .gitea_service import wizard_setup as gitea_wizard_setup
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
@@ -149,6 +150,14 @@ class SetupWizardTool:
         register this repo on it. See GITEA.md; call after setup_mount_dir
         (legacy in-mount state detection) and the docker checks."""
         gitea_wizard_setup(self.config)
+
+    # ---- Step: gateway service -----------------------------------------
+
+    def setup_gateway_service(self):
+        """Provision the machine-wide gateway (reverse-proxy) service container
+        that routes each project's http://<project>-<service>.localhost dev URLs
+        to its container ports. See GATEWAY.md."""
+        gateway_wizard_setup(self.config)
 
     # ---- Step: docker permissions --------------------------------------
 

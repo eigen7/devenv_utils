@@ -176,10 +176,11 @@ scratch.
 
 Per project, the footprint is small:
 
-- `devenv.toml` needs **no Gitea entries**: no Gitea port in
-  `required_ports`, no `-p` in `extra_docker_args`. (Gitea ports are also
-  exempt from the `INSTANCE` port-offset scheme — all instances share the
-  one service.)
+- `devenv.toml` needs **no Gitea entries**, and Gitea deliberately stays off
+  the gateway: its remote URL is written into every repo's `.git/config` and
+  must work for host-side git without a browser in the loop, so it keeps its
+  own loopback-published port rather than a `.localhost` route (see
+  [GATEWAY.md](GATEWAY.md)). The two service containers are siblings.
 - The project's setup wizard calls `tool.setup_gitea_service()`.
 - The project's Docker image does not install Gitea or nginx.
 
