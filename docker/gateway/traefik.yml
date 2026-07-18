@@ -1,0 +1,19 @@
+# Static configuration for the devenv-gateway Traefik instance (see GATEWAY.md).
+
+entryPoints:
+  # The single HTTP entrypoint; the container publishes it on the host's
+  # loopback. All *.localhost dev URLs enter here.
+  web:
+    address: ":80"
+
+providers:
+  # Routes are discovered from container labels on the `devenv` network. Only
+  # containers carrying traefik.enable=true are routed (exposedByDefault: false).
+  docker:
+    exposedByDefault: false
+    network: devenv
+
+# The dashboard router (Host(`devenv-gateway.localhost`)) is attached to the
+# api@internal service via the gateway container's own labels.
+api:
+  dashboard: true

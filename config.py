@@ -10,9 +10,47 @@ point can construct the config from the file's location alone -- without
 importing any project Python.
 """
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Service names and the project name become DNS labels (under `.localhost`) and
+# env-var suffixes, so they are restricted to lowercase letters, digits, and
+# hyphens, starting with a letter.
+_DNS_LABEL_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+@dataclass(frozen=True)
+class Service:
+    """One entry of the [services] table: a container port the gateway routes
+    to. `publish` additionally publishes 127.0.0.1:<port>:<port> for non-HTTP
+    traffic that hostname routing cannot carry (see GATEWAY.md)."""
+
+    port: int
+    publish: bool = False
+
+
+def _coerce_service(value) -> Service:
+    """Normalize a [services] value -- an int, a {port, publish} table, or an
+    already-built Service -- into a Service."""
+    if isinstance(value, Service):
+        return value
+    if isinstance(value, bool):
+        raise ValueError(f"service value {value!r} must be an int port or a {{port, publish}} table")
+    if isinstance(value, int):
+        return Service(port=value)
+    if isinstance(value, dict):
+        return Service(port=value["port"], publish=value.get("publish", False))
+    raise ValueError(f"service value {value!r} must be an int port or a {{port, publish}} table")
+
+
+def _validate_dns_label(kind: str, value: str):
+    if not _DNS_LABEL_RE.match(value):
+        raise ValueError(
+            f"{kind} {value!r} must match {_DNS_LABEL_RE.pattern}: it becomes a DNS "
+            "label under .localhost and an env-var suffix."
+        )
 
 
 @dataclass
@@ -37,13 +75,11 @@ class DevenvConfig:
     container_repo_path: str = "/workspace/repo"
     container_mount_path: str | None = "/workspace/mount"
 
-    # Ports forwarded host -> container by run_docker. For instance N (set via
-    # "INSTANCE" in .env.json) each is shifted up by instance_port_stride * N.
-    required_ports: list[int] = field(default_factory=list)
-    # Per-instance port shift. Instance N forwards every required port plus
-    # instance_port_stride * N; the same offset is pushed into the container as
-    # DEVENV_INSTANCE_PORT_OFFSET. See instances.py.
-    instance_port_stride: int = 100
+    # The named [services] table: service name -> container port, routed by the
+    # gateway as http://<project>-<service>.localhost (see GATEWAY.md). Each
+    # value is an int port, or the table form {port, publish} where publish=true
+    # additionally publishes 127.0.0.1:<port>:<port> for non-HTTP traffic.
+    services: dict[str, Service] = field(default_factory=dict)
     # Extra static args appended to every `docker run` (e.g. ["--ipc=host"]).
     extra_docker_args: list[str] = field(default_factory=list)
     # Unprivileged user the container runs as / VS Code attaches as.
@@ -96,6 +132,11 @@ class DevenvConfig:
             self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
+        self.services = {name: _coerce_service(v) for name, v in self.services.items()}
+        if self.services:
+            _validate_dns_label("project name", self.name)
+            for service_name in self.services:
+                _validate_dns_label("service name", service_name)
 
 
 # devenv.toml keys whose values are paths, resolved relative to the repo root.
