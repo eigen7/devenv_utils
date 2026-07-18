@@ -60,6 +60,9 @@ Then:
 4. Give your `CLAUDE.md` a short "Git submodules" section that links to
    `submodules/devenv_utils/SUBMODULES.md`, so coding agents follow the
    submodule workflow without each repo restating it.
+5. Optionally adopt the shared Claude Code skills under
+   [skills/](skills/README.md) by adding a thin pointer skill per adopted
+   skill to your `.claude/skills/` — see that README for the convention.
 
 ## Updating devenv_utils itself
 
