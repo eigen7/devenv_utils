@@ -19,7 +19,7 @@ It writes the generic glue (never overwriting an existing file):
     run_docker.py             launches (or attaches to) the dev container
 
 The PR-workflow tools need no per-project shim: run them straight from the
-submodule (submodules/devenv_utils/pr_flow.py, gitea_serve.py,
+submodule (submodules/devenv_utils/pr_flow.py, gitea_service.py,
 stale_worktrees.py) -- each reads the project's devenv.toml itself.
 
 Then: fill in devenv.toml, write docker-setup/Dockerfile, and point your
@@ -138,10 +138,12 @@ Run this *outside* the Docker container. It:
      sync (see submodules/devenv_utils/SUBMODULES.md).
   2. Picks the persistent host directory bind-mounted at /workspace/mount.
   3. Verifies you can run `docker` without sudo, on a new enough daemon.
-  4. Writes a per-container VS Code config so that "Dev Containers: Attach
+  4. Provisions the machine-wide Gitea PR-review service and registers this
+     repo on it (see submodules/devenv_utils/GITEA.md).
+  5. Writes a per-container VS Code config so that "Dev Containers: Attach
      to Running Container" connects as devuser instead of root.
-  5. Pre-trusts the container workspace paths in the host Claude Code config.
-  6. Builds the Docker image.
+  6. Pre-trusts the container workspace paths in the host Claude Code config.
+  7. Builds the Docker image.
 
 The generic steps live in `submodules/devenv_utils`; project-specific steps
 belong on the SetupWizard subclass below.
@@ -203,6 +205,8 @@ def main():
         tool.validate_docker_permissions()
         tool.rule()
         tool.validate_docker_version()
+        tool.rule()
+        tool.setup_gitea_service()
         tool.rule()
         tool.setup_vscode_attach_config()
         tool.rule()

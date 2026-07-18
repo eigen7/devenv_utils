@@ -22,6 +22,7 @@ from .docker_ops import (
     is_version_ok,
     major_version,
 )
+from .gitea_service import wizard_setup as gitea_wizard_setup
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
 from .vscode_attach import (
@@ -118,6 +119,14 @@ class SetupWizardTool:
             '/submodules/devenv_utils/prepush_guard.py "$@"\n'
         )
         hook.chmod(0o755)
+
+    # ---- Step: Gitea service -------------------------------------------
+
+    def setup_gitea_service(self):
+        """Provision (or adopt) the machine-wide Gitea service container and
+        register this repo on it. See GITEA.md; call after setup_mount_dir
+        (legacy in-mount state detection) and the docker checks."""
+        gitea_wizard_setup(self.config)
 
     # ---- Step: docker permissions --------------------------------------
 

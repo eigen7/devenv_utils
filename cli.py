@@ -19,6 +19,7 @@ from .docker_ops import (
     is_container_running,
     run_container,
 )
+from .gitea_service import dev_container_args
 from .instances import (
     assert_no_port_conflicts,
     instance_number,
@@ -122,7 +123,16 @@ def _launch_fresh(
         assert not is_subpath(mount_dir, config.repo_root), \
             f"Mount dir {mount_dir} must not live inside repo {config.repo_root}"
 
-    extra_args = pre_launch(args) if pre_launch is not None else None
+    extra_args = pre_launch(args) if pre_launch is not None else []
+
+    # Wire the dev container up to the Gitea service (network membership, env
+    # contract, credentials mount) -- and start the service if it is stopped.
+    host_network = "--network=host" in config.extra_docker_args + extra_args
+    try:
+        extra_args = extra_args + dev_container_args(host_network)
+    except SetupException as e:
+        print(e)
+        sys.exit(1)
 
     run_container(
         config, image=image, instance_name=args.instance_name,

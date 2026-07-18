@@ -14,8 +14,8 @@ worktree index's mtime (staging), and the mtimes of files git reports as
 changed or untracked (unstaged edits).
 
 Run this module directly from a consumer repo; it reads that repo's devenv.toml
-(see config.load_config). gitea_serve.py also prints the same report every time
-it runs.
+(see config.load_config). pr_flow.py also prints the same report whenever a
+worktree is created or a PR is opened.
 """
 
 import sys
@@ -122,8 +122,8 @@ def describe(stale: StaleWorktree) -> str:
 def print_stale_report(cfg: DevenvConfig, stale_days: float = DEFAULT_STALE_DAYS):
     """Print abandoned-worktree candidates, or nothing if there are none.
 
-    Called from gitea_serve.py on every run; a session seeing this output
-    should surface it to the user rather than delete anything itself.
+    Called from pr_flow.py's worktree/create commands; a session seeing this
+    output should surface it to the user rather than delete anything itself.
     """
     stale = find_stale_worktrees(cfg.repo_root, stale_days)
     if not stale:

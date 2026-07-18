@@ -11,9 +11,10 @@ Submodule-specific rules (pointer bumps, publishing order) live in
 
 Unless told otherwise, never make changes directly in the main checkout
 (`/workspace/repo`). Work in a git worktree and submit the result as a pull
-request on the local Gitea instance, which the user reviews from the host
-browser at http://localhost:3000/ (signed in automatically; see gitea_serve.py).
-All of these commands run **in the container** except `git publish`.
+request on the local Gitea service — a machine-wide Docker container the user
+reviews from the host browser at http://localhost:3000/ (signed in
+automatically; see GITEA.md). All of these commands run **in the container**
+except `git publish`.
 
 ## Lifecycle
 
@@ -63,8 +64,8 @@ intervene by hand, do it in the container against the main checkout
 ## Abandoned worktrees
 
 Abandoned worktrees (e.g. a task's chat was closed mid-flight) are never deleted
-automatically — they may hold uncommitted work. gitea_serve.py prints a report
-of worktrees idle for 7+ days (also standalone via stale_worktrees.py); relay it
+automatically — they may hold uncommitted work. pr_flow.py prints a report of
+worktrees idle for 7+ days (also standalone via stale_worktrees.py); relay it
 to the user, who decides. To delete one they've cleared, run
 `submodules/devenv_utils/pr_flow.py abandon <branch>` — it removes the worktree
 and its branch (even if unmerged) with no Gitea interaction.

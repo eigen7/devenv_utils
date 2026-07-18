@@ -37,8 +37,11 @@ That writes:
 | `run_docker.py` | launches (or attaches to) the dev container |
 
 The PR-workflow tools need no per-project shim: run them straight from the
-submodule (`submodules/devenv_utils/pr_flow.py`, `gitea_serve.py`,
-`stale_worktrees.py`) — each reads the project's `devenv.toml` itself.
+submodule (`submodules/devenv_utils/pr_flow.py`, `gitea_service.py`,
+`stale_worktrees.py`) — each reads the project's `devenv.toml` itself. The
+Gitea instance backing PR review is a single machine-wide service container,
+provisioned by the wizard's `setup_gitea_service()` step — see
+[GITEA.md](GITEA.md); it needs no per-project ports in `devenv.toml`.
 
 Then:
 
