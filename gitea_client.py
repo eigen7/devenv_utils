@@ -205,9 +205,17 @@ def gitea_repo_name(sub_dir: Path) -> str:
 
 
 def ensure_remote(repo_root: Path, url: str):
-    """Point `repo_root`'s `gitea` remote at `url`, adding or updating it."""
+    """Point `repo_root`'s `gitea` remote at `url`, adding or updating it.
+
+    Compares against the raw configured URL, not `git remote get-url`, whose
+    output bakes in the caller's insteadOf rewrites (in a dev container the
+    canonical URL rewrites to the service-container form, which must not
+    read as "the remote is stale")."""
     result = subprocess.run(
-        ["git", "remote", "get-url", REMOTE_NAME], capture_output=True, text=True, cwd=repo_root
+        ["git", "config", f"remote.{REMOTE_NAME}.url"],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
     )
     if result.returncode != 0:
         subprocess.run(["git", "remote", "add", REMOTE_NAME, url], check=True, cwd=repo_root)
