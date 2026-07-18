@@ -37,7 +37,8 @@ import subprocess
 import urllib.parse
 
 from .config import DevenvConfig, load_config
-from .pr_flow import commit_present, gitmodule_entries, submodule_pointer
+from .gitea_client import gitmodule_entries
+from .pr_flow import commit_present, submodule_pointer
 from .state import in_docker_container
 from .worktrees import secondary_worktrees
 
@@ -53,20 +54,19 @@ def git_out(cwd: Path, *args: str) -> str:
 
 
 def gitea_read_url(repo_root: Path, sub_path: str = "") -> str:
-    """The auth-free web-port URL of a Gitea repo, for read-only fetch.
+    """The URL of a Gitea repo as fetchable from the host, for read-only use.
 
-    Everything is derived from the parent's `gitea` remote -- always present, as
-    the review remote. That remote targets the loopback backend port with
-    embedded admin credentials; on the host only the nginx web port (backend - 1)
-    is reachable, and the repos are public, so drop the credentials and step the
-    port down. A submodule's Gitea repo lives under the same owner, named after
-    its GitHub origin (the same project), so it needs no `gitea` remote of its
-    own -- which a fresh submodule clone lacks.
+    Derived from the parent's `gitea` remote -- always present, as the review
+    remote. That remote holds the canonical credential-free web-port URL
+    (see gitea_client.py), which resolves on the host as-is. A submodule's
+    Gitea repo lives under the same owner, named after its GitHub origin (the
+    same project), so it needs no `gitea` remote of its own -- which a fresh
+    submodule clone lacks.
     """
     parent = urllib.parse.urlparse(git_out(repo_root, "remote", "get-url", "gitea"))
-    base = f"http://{parent.hostname}:{parent.port - 1}"
     if not sub_path:
-        return f"{base}{parent.path}"
+        return parent.geturl()
+    base = f"{parent.scheme}://{parent.netloc}"
     owner = parent.path.strip("/").split("/")[0]
     origin = urllib.parse.urlparse(git_out(repo_root / sub_path, "remote", "get-url", "origin"))
     name = Path(origin.path).stem

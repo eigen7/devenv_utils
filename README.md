@@ -28,8 +28,9 @@ Coding agents (Claude Code and friends) work best on an isolated checkout: a
 disturbing your working tree or other in-flight work. But you still want to
 **review and approve** those changes the way you'd review a colleague's — a
 GitHub-style pull request in the browser, with a diff and inline comments. So
-this ships a **local Gitea** instance, running in the container, that gives
-every worktree branch a PR page — entirely on your machine, no external service.
+this ships a **local Gitea** instance — a machine-wide Docker service container
+that is simply always running (see [GITEA.md](GITEA.md)) — that gives every
+worktree branch a PR page — entirely on your machine, no external service.
 
 It also smooths over a genuinely thorny corner: **git worktrees and git
 submodules interact badly.** Worktree metadata bakes in absolute paths that only
@@ -81,4 +82,6 @@ hook is installed by `./setup_wizard.py`, not automatically on clone.)
   (scaffolding, `devenv.toml`, wiring `setup_git_config()`).
 - **[WORKFLOW.md](WORKFLOW.md)** — the worktree → PR → publish workflow in full;
   written for the coding agent, and pointed at by each consumer's `CLAUDE.md`.
+- **[GITEA.md](GITEA.md)** — how the machine-wide Gitea service container works
+  (design, URLs, auth, lifecycle, migration).
 - **[SUBMODULES.md](SUBMODULES.md)** — rules for changing this submodule.

@@ -13,9 +13,10 @@ submodules, which get their own PR when a change spans both. Naming the repo
 explicitly is deliberate: a coordinated change has a PR #N in each repo, and
 the tool must never guess which one you mean.
 
-Runs inside the dev container, where Gitea's loopback backend is reachable.
-Accepting a PR only advances Gitea's `main`; nothing reaches your local
-checkout or GitHub until you run `git publish` on the host.
+Runs inside the dev container, which is wired up to the Gitea service and
+its admin credentials (see gitea_client.py). Accepting a PR only advances
+Gitea's `main`; nothing reaches your local checkout or GitHub until you run
+`git publish` on the host.
 """
 
 import sys
@@ -31,26 +32,28 @@ if __package__ in (None, ""):
 import argparse
 
 from .config import DevenvConfig, load_config
-from .gitea_serve import api, ensure_serving
+from .gitea_client import container_access
 from .state import in_docker_container
 
 
 def merge_pr(cfg: DevenvConfig, repo: str, number: int):
     if not in_docker_container():
         raise SystemExit(
-            "gitea_merge runs inside the dev container -- it talks to Gitea's loopback "
-            "backend, which is not published to the host. Merge from the container "
-            "(or just use the Gitea web page)."
+            "gitea_merge runs inside the dev container, where the Gitea admin "
+            "credentials are mounted. Merge from the container (or just use the "
+            "Gitea web page)."
         )
-    admin, _, backend_port = ensure_serving(cfg)
+    access = container_access()
+    access.ensure_reachable()
+    admin = access.admin_creds()
     owner = admin["username"]
-    pr = api("GET", backend_port, f"/repos/{owner}/{repo}/pulls/{number}", admin)
+    pr = access.api("GET", f"/repos/{owner}/{repo}/pulls/{number}", admin)
     if pr["merged"]:
         print(f"{owner}/{repo} PR #{number} is already merged.")
         return
     if not pr["mergeable"]:
         raise SystemExit(f"{owner}/{repo} PR #{number} is not mergeable (conflicts or checks).")
-    api("POST", backend_port, f"/repos/{owner}/{repo}/pulls/{number}/merge", admin, {"Do": "merge"})
+    access.api("POST", f"/repos/{owner}/{repo}/pulls/{number}/merge", admin, {"Do": "merge"})
     print(f"Merged {owner}/{repo} PR #{number}. Publish it with `git publish` on the host.")
 
 

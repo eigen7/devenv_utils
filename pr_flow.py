@@ -2,9 +2,9 @@
 """Drive the worktree-and-PR review workflow end to end.
 
 Every change to a consumer repo lands through a pull request on the local
-Gitea instance, which the user reviews from the host browser (see
-gitea_serve.py). Run this module directly from a consumer repo -- it reads that
-repo's devenv.toml (see config.load_config) -- so a task is these commands:
+Gitea service, which the user reviews from the host browser (see GITEA.md).
+Run this module directly from a consumer repo -- it reads that repo's
+devenv.toml (see config.load_config) -- so a task is these commands:
 
   submodules/devenv_utils/pr_flow.py worktree <branch>
       New worktree at <worktrees_dir>/<branch> on a new branch <branch>, with
@@ -13,11 +13,11 @@ repo's devenv.toml (see config.load_config) -- so a task is these commands:
       commits from the user's.
 
   submodules/devenv_utils/pr_flow.py create <branch> --title ... [--body-file ... | --body ...]
-      Start the Gitea stack if needed, push the branch, and open its PR -- plus
-      a PR in each submodule the branch advances (they merge first) -- as the
-      dedicated `claude` Gitea user (provisioned on first use, credentials in
-      <mount>/gitea/claude_credentials.json) so Gitea shows Claude, not the
-      reviewing admin, as pusher and author. Prints the review + merge handoff.
+      Push the branch to the Gitea service and open its PR -- plus a PR in
+      each submodule the branch advances (they merge first) -- as the
+      dedicated `claude` Gitea user (see gitea_client.py) so Gitea shows
+      Claude, not the reviewing admin, as pusher and author. Prints the
+      review + merge handoff.
 
   submodules/devenv_utils/pr_flow.py abandon <branch>
       Tear down a worktree and delete its (possibly unmerged) branch, without
@@ -42,63 +42,25 @@ if __package__ in (None, ""):
     __package__ = "submodules.devenv_utils"
 
 import argparse
-import json
-import secrets
 import shutil
 import subprocess
-import urllib.parse
 
 from .config import DevenvConfig, load_config
-from .gitea_serve import GITEA_ROOT, api, ensure_serving
+from .gitea_client import (
+    CLAUDE_EMAIL,
+    GiteaAccess,
+    container_access,
+    ensure_project_remotes,
+    gitea_repo_name,
+    gitmodule_entries,
+    register_repo,
+)
+from .stale_worktrees import print_stale_report
 from .worktrees import primary_worktree, worktree_for_branch
-
-CLAUDE_CREDENTIALS_PATH = GITEA_ROOT / "claude_credentials.json"
-CLAUDE_USER = "claude"
-# Matches the commit identity, so Gitea links Claude's commits to the user.
-CLAUDE_EMAIL = "noreply@anthropic.com"
 
 
 def run(cmd: list[str], cwd: Path):
     subprocess.run(cmd, check=True, cwd=cwd)
-
-
-def ensure_claude_user(admin: dict, backend_port: int) -> dict:
-    """The `claude` Gitea user's credentials, provisioning the user (and the
-    600-mode credentials file) on first use."""
-    if CLAUDE_CREDENTIALS_PATH.exists():
-        return json.loads(CLAUDE_CREDENTIALS_PATH.read_text())
-    creds = {"username": CLAUDE_USER, "password": secrets.token_urlsafe(16)}
-    api(
-        "POST",
-        backend_port,
-        "/admin/users",
-        admin,
-        {
-            "username": creds["username"],
-            "email": CLAUDE_EMAIL,
-            "password": creds["password"],
-            "must_change_password": False,
-        },
-    )
-    CLAUDE_CREDENTIALS_PATH.write_text(json.dumps(creds, indent=2) + "\n")
-    CLAUDE_CREDENTIALS_PATH.chmod(0o600)
-    return creds
-
-
-def gitmodule_entries(root: Path) -> list[tuple[str, str]]:
-    """(name, path) for each submodule declared in root's .gitmodules."""
-    listing = subprocess.run(
-        ["git", "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=root,
-    )
-    entries = []
-    for line in listing.stdout.splitlines():
-        key, path = line.split(" ", 1)
-        entries.append((key.removeprefix("submodule.").removesuffix(".path"), path))
-    return entries
 
 
 def init_submodules(main: Path, worktree: Path):
@@ -209,6 +171,7 @@ def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
     run(["git", "config", "--worktree", "user.name", "Claude"], cwd=path)
     run(["git", "config", "--worktree", "user.email", CLAUDE_EMAIL], cwd=path)
     print(f"Worktree ready: {path}")
+    print_stale_report(cfg)
 
 
 def git_out(cwd: Path, *args: str) -> str:
@@ -217,51 +180,34 @@ def git_out(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def push_url(backend_port: int, owner: str, repo: str, user: str, password: str) -> str:
-    """An authenticated backend-port push URL for a server-side repo."""
-    return f"http://{user}:{password}@localhost:{backend_port}/{owner}/{repo}.git"
-
-
-def claude_push_url(backend_port: int, owner: str, repo: str, claude: dict) -> str:
-    """A claude-credentialed push URL (the `gitea` remote embeds the admin's)."""
-    return push_url(backend_port, owner, repo, CLAUDE_USER, claude["password"])
-
-
-def seed_repo_main(backend_port: int, owner: str, repo: str, admin: dict, sub: Path, base: str):
+def seed_repo_main(access: GiteaAccess, owner: str, repo: str, admin: dict, sub: Path, base: str):
     """Give a submodule's server-side repo a `main` at commit `base`, creating
     the repo itself through Gitea's push-to-create (ENABLE_PUSH_CREATE_USER).
     `base` is the published state a PR should diff against."""
-    url = push_url(backend_port, owner, repo, admin["username"], admin["password"])
+    url = access.authed_repo_url(owner, repo, admin)
     run(["git", "push", url, f"{base}:refs/heads/main"], cwd=sub)
 
 
-def grant_claude_write(backend_port: int, owner: str, repo: str, admin: dict):
+def grant_claude_write(access: GiteaAccess, owner: str, repo: str, admin: dict, claude: dict):
     """Idempotent; also repairs a claude user that lost repo access."""
-    api(
+    access.api(
         "PUT",
-        backend_port,
-        f"/repos/{owner}/{repo}/collaborators/{CLAUDE_USER}",
+        f"/repos/{owner}/{repo}/collaborators/{claude['username']}",
         admin,
         {"permission": "write"},
     )
 
 
-def open_pr(backend_port: int, web_port: int, owner: str, repo: str, claude: dict, fields: dict):
-    """Open a PR on `owner/repo`; returns (number, web URL)."""
-    pr = api("POST", backend_port, f"/repos/{owner}/{repo}/pulls", claude, fields)
-    return pr["number"], f"http://localhost:{web_port}/{owner}/{repo}/pulls/{pr['number']}"
-
-
-def gitea_repo_name(sub_dir: Path) -> str:
-    """A submodule's Gitea repo name -- its origin basename (same project)."""
-    return Path(urllib.parse.urlparse(git_out(sub_dir, "remote", "get-url", "origin")).path).stem
+def open_pr(access: GiteaAccess, owner: str, repo: str, claude: dict, fields: dict):
+    """Open a PR on `owner/repo`; returns (number, browser URL)."""
+    pr = access.api("POST", f"/repos/{owner}/{repo}/pulls", claude, fields)
+    return pr["number"], access.browser_url(f"{owner}/{repo}/pulls/{pr['number']}")
 
 
 def open_submodule_prs(
     primary: Path,
     worktree: Path,
-    backend_port: int,
-    web_port: int,
+    access: GiteaAccess,
     owner: str,
     admin: dict,
     claude: dict,
@@ -281,7 +227,7 @@ def open_submodule_prs(
         head = git_out(sub, "rev-parse", "HEAD")
         repo = gitea_repo_name(sub)
         listing = subprocess.run(
-            ["git", "ls-remote", f"http://localhost:{backend_port}/{owner}/{repo}.git", "main"],
+            ["git", "ls-remote", access.read_repo_url(owner, repo), "main"],
             cwd=sub,
             capture_output=True,
             text=True,
@@ -289,23 +235,22 @@ def open_submodule_prs(
         gitea_main = listing.stdout.split()[0] if listing.returncode == 0 and listing.stdout else ""
         if not gitea_main:
             gitea_main = submodule_pointer(primary, sub_path)
-            seed_repo_main(backend_port, owner, repo, admin, sub, gitea_main)
+            seed_repo_main(access, owner, repo, admin, sub, gitea_main)
         if head == gitea_main:
             continue
-        grant_claude_write(backend_port, owner, repo, admin)
+        grant_claude_write(access, owner, repo, admin, claude)
         run(
             [
                 "git",
                 "push",
-                claude_push_url(backend_port, owner, repo, claude),
+                access.authed_repo_url(owner, repo, claude),
                 f"{head}:refs/heads/{args.branch}",
             ],
             cwd=sub,
         )
         body = Path(args.body_file).read_text() if args.body_file else args.body
         number, url = open_pr(
-            backend_port,
-            web_port,
+            access,
             owner,
             repo,
             claude,
@@ -331,25 +276,29 @@ def print_handoff(sub_prs: list[tuple[str, int, str]], repo: str, number: int, u
 def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
-    admin, web_port, backend_port = ensure_serving(cfg)
+    access = container_access()
+    access.ensure_reachable()
+    admin = access.admin_creds()
+    claude = access.claude_creds()
     owner = admin["username"]
-    claude = ensure_claude_user(admin, backend_port)
+    ensure_project_remotes(access, main, cfg.name, owner)
+    register_repo(access, main, cfg.name, owner)
 
     # A coordinated change has a PR in each touched submodule too; open those
     # first (they merge first) and cross-reference them from the consumer PR.
     worktree = worktree_for_branch(main, args.branch)
     sub_prs = (
-        open_submodule_prs(main, worktree, backend_port, web_port, owner, admin, claude, args)
+        open_submodule_prs(main, worktree, access, owner, admin, claude, args)
         if worktree is not None
         else []
     )
 
-    grant_claude_write(backend_port, owner, cfg.name, admin)
+    grant_claude_write(access, owner, cfg.name, admin, claude)
     # Pushing from the primary checkout satisfies push.recurseSubmodules=check:
     # its submodule clones carry the gitea remote-tracking refs a worktree's
     # freshly file-cloned submodules lack.
     run(
-        ["git", "push", claude_push_url(backend_port, owner, cfg.name, claude), args.branch],
+        ["git", "push", access.authed_repo_url(owner, cfg.name, claude), args.branch],
         cwd=main,
     )
 
@@ -357,14 +306,14 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     if sub_prs:
         body += submodule_pr_note(sub_prs)
     number, url = open_pr(
-        backend_port,
-        web_port,
+        access,
         owner,
         cfg.name,
         claude,
         {"title": args.title, "head": args.branch, "base": "main", "body": body},
     )
     print_handoff(sub_prs, cfg.name, number, url)
+    print_stale_report(cfg)
 
 
 def cmd_abandon(cfg: DevenvConfig, args: argparse.Namespace):
