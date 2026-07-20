@@ -63,18 +63,35 @@ every host-side entry point imports `setup_common` first. `git clone
 ## Day-to-day sync
 
 `SetupWizardTool.setup_git_config()` (call it from the consumer's setup
-wizard) applies two settings:
+wizard) applies these settings:
 
 * `submodule.recurse=true` — `git pull` / `git checkout` update each
   submodule working tree to match the recorded pointer.
 * `push.recurseSubmodules=check` — git refuses to push a commit whose
   submodule pointer references a commit absent from the submodule's remote.
+* `status.submodulesummary=1` and `diff.submodule=log` — status and diff
+  describe a submodule pointer change by the commits it spans (with a
+  `(rewind)` marker on backward moves) instead of by raw SHAs.
 
 (`push.recurseSubmodules=on-demand` would instead push the submodule
 automatically during a superproject push, but it cannot push from a
 detached-HEAD submodule checkout — the normal state of a checkout synced by
-`git submodule update` — so the explicit push_upstream.py flow above is the
+`git submodule update` — so the explicit `git publish` flow above is the
 reliable path, with `check` as the guard.)
+
+It also installs submodule_guard.py as git hooks, covering the two gaps the
+settings leave:
+
+* `git rebase` — fast-forward or not — does not update submodule working
+  trees (`submodule.recurse` covers checkout and pull only). The
+  post-checkout/post-merge `sync` action updates any stale submodule
+  checkout, skipping with a warning one that has uncommitted changes or
+  commits the recorded pointer lacks — it never discards work.
+* A stale submodule checkout swept into the index by a broad `git add`
+  records a *backward* pointer move that `push.recurseSubmodules=check`
+  cannot catch (the older commit exists upstream). The pre-commit action
+  blocks it and prints the resync commands; `git commit --no-verify`
+  rewinds deliberately.
 
 ## Worktrees
 
