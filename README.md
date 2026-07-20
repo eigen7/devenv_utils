@@ -100,6 +100,38 @@ the tip is already mirrored, so the next mirror push will refuse and tell you
 how to reconcile. Feature branches and worktrees are untouched by all of
 this.
 
+## Submodules day to day
+
+`submodules/devenv_utils` is a git submodule: a nested checkout of its own
+repo, pinned by the parent repo to one exact commit (see
+[SUBMODULES.md](SUBMODULES.md) for the full model). The wizard's git config
+and hooks absorb most of the usual submodule friction; here is what the
+remaining symptoms mean and what to do about them:
+
+- **A fresh clone has an empty `submodules/devenv_utils/`.** Run any entry
+  point (`./setup_wizard.py`, `./run_docker.py`) — each populates it before
+  doing anything else. (`git clone --recurse-submodules` avoids the empty
+  state entirely.)
+- **`git status` shows `modified: submodules/devenv_utils (new commits)`.**
+  The nested checkout sits at a different commit than the parent records;
+  status lists the commits in between. After `pull`, `checkout`, `rebase`,
+  or a merge, hooks re-sync it automatically (printing
+  `synced submodules/devenv_utils -> <sha>`), so seeing this usually means
+  the checkout has real local work — or hooks aren't installed (re-run
+  `./setup_wizard.py`). To sync by hand: `git submodule update --init`.
+- **A commit is refused with "would move the submodule ... backward".**
+  That's the guard against the classic accident: a stale nested checkout
+  swept up by a broad `git add`, which would silently pin the parent to an
+  *older* devenv_utils. Run the two commands the message prints; use
+  `git commit --no-verify` only if the rewind is truly intended.
+- **`git stash` ignores edits under `submodules/devenv_utils/`.** Stash
+  works per-repo; stash inside the nested repo instead:
+  `git -C submodules/devenv_utils stash`.
+- **Editing files under `submodules/devenv_utils/`** means committing twice
+  — once inside the submodule, once for the parent's pointer bump. The
+  agent's PR flow does this for you; the rules are in
+  [SUBMODULES.md](SUBMODULES.md).
+
 ## Docs
 
 - **[CONSUMER_SETUP.md](CONSUMER_SETUP.md)** — set up a new project to use this

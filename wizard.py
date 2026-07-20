@@ -74,15 +74,19 @@ class SetupWizardTool:
     # ---- Step: git config -----------------------------------------------
 
     # Git hooks installed into the repo's shared hooks directory:
-    # hook name -> (devenv_utils script, extra args appended to the exec line).
+    # hook name -> ordered (devenv_utils script, extra args) entries, run in
+    # sequence; a failing entry aborts the hook and skips the rest.
     # prepush_guard.py steers a stray `git push` to GitHub origin back to
     # `git publish`; commit_guard.py keeps direct commits on `main` in
-    # lockstep with Gitea (see its docstring).
+    # lockstep with Gitea; submodule_guard.py blocks backward submodule
+    # pointer moves and re-syncs stale submodule checkouts after
+    # rebase/merge (see each script's docstring).
     GIT_HOOKS = {
-        "pre-push": ("prepush_guard.py", ' "$@"'),
-        "pre-commit": ("commit_guard.py", " pre-commit"),
-        "post-commit": ("commit_guard.py", " post-commit"),
-        "post-merge": ("commit_guard.py", " post-merge"),
+        "pre-push": [("prepush_guard.py", ' "$@"')],
+        "pre-commit": [("commit_guard.py", " pre-commit"), ("submodule_guard.py", " pre-commit")],
+        "post-commit": [("commit_guard.py", " post-commit")],
+        "post-merge": [("commit_guard.py", " post-merge"), ("submodule_guard.py", " sync")],
+        "post-checkout": [("submodule_guard.py", " sync")],
     }
 
     def setup_git_config(self):
@@ -94,11 +98,16 @@ class SetupWizardTool:
         - push.recurseSubmodules=check: git refuses to push a commit whose
           submodule pointer references a commit absent from the submodule's
           remote, which would break every other clone.
+        - status.submodulesummary=1 / diff.submodule=log: status and diff
+          describe a submodule pointer change by the commits it spans (with
+          a `(rewind)` marker on backward moves) instead of by raw SHAs.
         - alias.publish: `git publish` runs publish.py (the host-side publish
           step).
-        - the GIT_HOOKS guards: the pre-push origin guard, and the
+        - the GIT_HOOKS guards: the pre-push origin guard, the
           pre/post-commit + post-merge hooks that keep direct `main` commits
-          in lockstep with Gitea.
+          in lockstep with Gitea, and the submodule_guard hooks (backward
+          pointer moves blocked at commit time; stale submodule checkouts
+          re-synced after rebase/merge).
 
         Clears core.hooksPath so git uses the repo's default hooks directory,
         where the hooks are installed.
@@ -108,6 +117,8 @@ class SetupWizardTool:
         for key, value in [
             ("submodule.recurse", "true"),
             ("push.recurseSubmodules", "check"),
+            ("status.submodulesummary", "1"),
+            ("diff.submodule", "log"),
             ("alias.publish", publish),
         ]:
             subprocess.run(["git", "config", key, value], cwd=repo_root, check=True)
@@ -133,14 +144,13 @@ class SetupWizardTool:
         ).stdout.strip()
         hooks_dir = Path(common_dir) / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        for name, (script, args) in cls.GIT_HOOKS.items():
+        for name, entries in cls.GIT_HOOKS.items():
+            lines = ["#!/bin/sh", 'top="$(git rev-parse --show-toplevel)"']
+            for script, args in entries:
+                lines.append(f'tool="$top/submodules/devenv_utils/{script}"')
+                lines.append(f'[ ! -x "$tool" ] || "$tool"{args} || exit $?')
             hook = hooks_dir / name
-            hook.write_text(
-                "#!/bin/sh\n"
-                f'tool="$(git rev-parse --show-toplevel)/submodules/devenv_utils/{script}"\n'
-                '[ -x "$tool" ] || exit 0\n'
-                f'exec "$tool"{args}\n'
-            )
+            hook.write_text("\n".join(lines) + "\n")
             hook.chmod(0o755)
 
     # ---- Step: Gitea service -------------------------------------------
