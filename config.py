@@ -44,6 +44,34 @@ def _coerce_service(value) -> Service:
     raise ValueError(f"service value {value!r} must be an int port or {{port, publish}} table")
 
 
+# How `git pull` reacts when a submodule's Gitea main has advanced past the
+# recorded pointer (see submodule_bump.py). "prompt" offers the bump
+# interactively, "never" prints a one-line note, "always" bumps without asking.
+PULL_UPDATE_MODES = ("prompt", "never", "always")
+
+
+@dataclass(frozen=True)
+class Submodules:
+    """The [submodules] table: submodule-workflow knobs. `pull_update` chooses
+    how a `git pull` reacts to a submodule whose Gitea main is ahead of the
+    recorded pointer -- one of PULL_UPDATE_MODES."""
+
+    pull_update: str = "prompt"
+
+
+def _coerce_submodules(value) -> Submodules:
+    """Normalize a [submodules] value -- a {pull_update} table or an already-built
+    Submodules -- into a Submodules, rejecting an out-of-range pull_update."""
+    if isinstance(value, Submodules):
+        return value
+    if isinstance(value, dict):
+        mode = value.get("pull_update", "prompt")
+        if mode not in PULL_UPDATE_MODES:
+            raise ValueError(f"pull_update {mode!r} must be one of {PULL_UPDATE_MODES}")
+        return Submodules(pull_update=mode)
+    raise ValueError(f"[submodules] {value!r} must be a table")
+
+
 def _validate_dns_label(kind: str, value: str):
     if not _DNS_LABEL_RE.match(value):
         raise ValueError(
@@ -79,6 +107,8 @@ class DevenvConfig:
     # value is an int port, or the table form {port, publish} where publish=true
     # additionally publishes 127.0.0.1:<port>:<port> for non-HTTP traffic.
     services: dict[str, Service] = field(default_factory=dict)
+    # The [submodules] table of submodule-workflow knobs (see Submodules).
+    submodules: "Submodules" = field(default_factory=Submodules)
     # Extra static args appended to every `docker run` (e.g. ["--ipc=host"]).
     extra_docker_args: list[str] = field(default_factory=list)
     # Unprivileged user the container runs as / VS Code attaches as.
@@ -132,6 +162,7 @@ class DevenvConfig:
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
         self.services = {name: _coerce_service(v) for name, v in self.services.items()}
+        self.submodules = _coerce_submodules(self.submodules)
         if self.services:
             _validate_dns_label("project name", self.name)
             for service_name in self.services:
