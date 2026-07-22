@@ -38,12 +38,23 @@ if __package__ in (None, ""):
 
 import shutil
 import subprocess
-import urllib.parse
+import sys
 
 from .config import DevenvConfig, load_config
 from .gitea_client import REMOTE_NAME, gitmodule_entries
 from .pr_flow import commit_present, submodule_pointer
 from .state import in_docker_container
+from .submodule_bump import (
+    BumpOffer,
+    bump_commands_text,
+    bump_commit,
+    bump_header,
+    bump_question,
+    evaluate_bump,
+    gitea_read_url,
+    is_ancestor,
+    short,
+)
 from .worktrees import secondary_worktrees
 
 
@@ -55,37 +66,6 @@ def git_out(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
     ).stdout.strip()
-
-
-def gitea_read_url(repo_root: Path, sub_path: str = "") -> str:
-    """The URL of a Gitea repo as fetchable from the host, for read-only use.
-
-    Derived from the parent's `gitea` remote -- always present, as the review
-    remote. That remote holds the canonical credential-free web-port URL
-    (see gitea_client.py), which resolves on the host as-is. Read from raw
-    config rather than `git remote get-url`, which would bake in the caller's
-    insteadOf rewrites (in a dev container, the canonical URL rewrites to the
-    service-container form). A submodule's Gitea repo lives under the same
-    owner, named after its GitHub origin (the same project), so it needs no
-    `gitea` remote of its own -- which a fresh submodule clone lacks.
-    """
-    parent = urllib.parse.urlparse(git_out(repo_root, "config", f"remote.{REMOTE_NAME}.url"))
-    if not sub_path:
-        return parent.geturl()
-    base = f"{parent.scheme}://{parent.netloc}"
-    owner = parent.path.strip("/").split("/")[0]
-    origin = urllib.parse.urlparse(git_out(repo_root / sub_path, "remote", "get-url", "origin"))
-    name = Path(origin.path).stem
-    return f"{base}/{owner}/{name}.git"
-
-
-def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
-    return (
-        subprocess.run(
-            ["git", "merge-base", "--is-ancestor", maybe_ancestor, of], cwd=repo
-        ).returncode
-        == 0
-    )
 
 
 DECLINED_NOTICE = "Nothing was changed or published."
@@ -269,6 +249,40 @@ def sync_submodule(repo_root: Path, sub_path: str):
     git(repo_root, "submodule", "update", "--init", sub_path)
 
 
+def publish_bump_explanation(offer: BumpOffer) -> str:
+    return (
+        f"The {offer.name} submodule's Gitea main has commits the superproject's\n"
+        "recorded pointer does not include yet -- typically a submodule PR that just\n"
+        "merged. Answering Y checks the submodule out at that tip and commits the\n"
+        "pointer bump on main; the superproject push later in this publish run ships\n"
+        "it.\n"
+        "\n"
+        "Proceeding with Y runs the commands:\n"
+        "\n"
+        f"{bump_commands_text(offer.name, offer.sub_path, offer.tip)}"
+    )
+
+
+def offer_pointer_bump(repo_root: Path, name: str, sub_path: str):
+    """Offer to advance one submodule's recorded pointer to its Gitea main tip.
+
+    Declining continues the publish run (unlike the sync_main prompts, which
+    abort): the bump is a convenience, not a precondition. Accepting commits the
+    bump on main, which the later `git push origin main` then ships -- after the
+    submodule push, so push.recurseSubmodules is satisfied.
+    """
+    offer = evaluate_bump(repo_root, name, sub_path)
+    if offer is None or offer.status == "none":
+        return
+    if offer.status in ("diverged", "unsafe"):
+        print(f"warning: {offer.warning}", file=sys.stderr)
+        return
+    print_commits(bump_header(offer), list(offer.spanned))
+    if confirm(bump_question(offer), publish_bump_explanation(offer)):
+        bump_commit(offer, repo_root)
+        print(f"  committed pointer bump: {sub_path} -> {short(offer.tip)}")
+
+
 def origin_default_branch(sub: Path) -> str:
     """The submodule origin's default branch (falls back to main when the clone
     never learned origin/HEAD)."""
@@ -322,6 +336,8 @@ def publish(repo_root: Path):
     entries = gitmodule_entries(repo_root)
     for _, sub_path in entries:
         sync_submodule(repo_root, sub_path)
+    for name, sub_path in entries:
+        offer_pointer_bump(repo_root, name, sub_path)
     print("Publishing to GitHub origin (submodules first)...")
     for _, sub_path in entries:
         publish_submodule(repo_root, sub_path)
