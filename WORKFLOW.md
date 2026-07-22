@@ -44,9 +44,10 @@ except `git publish`.
 
 Merging on Gitea ("accept") only advances Gitea's `main`; nothing reaches the
 local checkout or GitHub until **`git publish`**. `git publish` runs on the host
-(the GitHub credentials live there) and is the only host step: it fast-forwards
-the main checkout, publishes to GitHub (submodule-first), and removes the merged
-worktree. It reads the merge from Gitea over the public web port, so a
+(the GitHub credentials live there) and is the only host step: it syncs the
+main checkout with Gitea's `main` (asking before any merge/rebase when
+histories have diverged), publishes to GitHub (submodule-first), and removes
+the merged worktree. It reads the merge from Gitea over the public web port, so a
 referenced submodule commit needs only to be on Gitea, not yet on GitHub. A
 pre-push hook redirects a stray bare `git push` to `git publish` and refuses
 origin pushes from inside the container.
