@@ -55,9 +55,21 @@ def update_one(repo_root: Path, name: str, sub_path: str) -> bool:
     """Offer to bump one submodule's pointer. Returns whether a bump was
     committed. Prints a status line for a current pointer (this is an explicit
     invocation, so silence would be wrong) and a warning for one that cannot be
-    bumped safely."""
+    reached or bumped safely.
+
+    A None result means the freshness check never ran -- no Gitea URL could be
+    derived, or the fetch failed (e.g. the service is down). Unlike a hook,
+    which fails open silently, this script exists to answer "is anything newer
+    upstream?", so it reports the outage rather than claiming the pointer is
+    current."""
     offer = evaluate_bump(repo_root, name, sub_path)
-    if offer is None or offer.status == "none":
+    if offer is None:
+        print(
+            f"warning: {name}: could not reach the submodule's Gitea repo; skipped.",
+            file=sys.stderr,
+        )
+        return False
+    if offer.status == "none":
         print(f"{name}: up to date")
         return False
     if offer.status in ("diverged", "unsafe"):
