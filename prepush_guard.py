@@ -29,8 +29,15 @@ import subprocess
 
 from .config import DevenvConfig, load_config
 from .gitea_client import SERVICE_CONTAINER
-from .publish import DIVERGED_ADVICE, LOCAL_AHEAD_ADVICE, gitea_read_url, main_relationship
+from .publish import gitea_read_url, main_relationship
 from .state import in_docker_container
+
+LOCAL_AHEAD_ADVICE = "Local main has commits that Gitea's main lacks. Run `git publish`."
+
+DIVERGED_ADVICE = (
+    "Local main and Gitea's main have diverged: each has commits the other lacks.\n"
+    "Run `git publish`."
+)
 
 
 def is_origin_push(remote_name: str, remote_url: str) -> bool:
@@ -67,8 +74,7 @@ def main(cfg: DevenvConfig):
     relation = main_relationship(root, gitea_main)
     if relation == "behind":
         sys.exit(
-            "Gitea's main has merged commits your local main doesn't have yet.\n"
-            "Run `git publish` -- it fast-forwards, publishes to origin, and cleans up."
+            "Gitea's main has merged commits your local main doesn't have yet.\nRun `git publish`."
         )
     if relation == "ahead":
         sys.exit(LOCAL_AHEAD_ADVICE)

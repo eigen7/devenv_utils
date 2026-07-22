@@ -34,10 +34,11 @@ Gitea:
 git publish
 ```
 
-It fast-forwards the local checkout to Gitea's `main`, then pushes each
-submodule pointer commit that GitHub is missing (plain fast-forwards; divergence
-fails loudly) before pushing the superproject -- so the ordering above holds
-automatically. `push.recurseSubmodules=check` (below) is the backstop, and a
+It reconciles the local checkout with Gitea's `main` (normally a plain
+fast-forward; a diverged history, or commits that reached GitHub outside the
+Gitea flow, prompt for the safe merge/rebase interactively), then pushes each
+submodule pointer commit that GitHub is missing before pushing the
+superproject -- so the ordering above holds automatically. `push.recurseSubmodules=check` (below) is the backstop, and a
 pre-push hook redirects a stray bare `git push` to `git publish`. See
 publish.py.
 

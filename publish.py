@@ -5,8 +5,12 @@ After a PR is merged on Gitea (the browser "Merge" button, or gitea_merge.py),
 the merge lives only on the Gitea server. This command -- run on the **host**,
 where the GitHub credentials live -- catches everything up in one shot:
 
-  1. fast-forward the local `main` to Gitea's `main` (fetched read-only over the
-     nginx web port, no auth: the repos are public),
+  1. reconcile the local `main` with Gitea's `main` (fetched read-only over the
+     nginx web port, no auth: the repos are public) and with GitHub's. The
+     normal case is a plain fast-forward; a diverged history, or commits that
+     reached GitHub outside the Gitea flow, are resolved interactively --
+     merge vs rebase chosen so that nothing another repository already holds
+     is ever rewritten (see sync_main),
   2. check out each submodule to its newly recorded pointer, fetching the commit
      from Gitea when the local clone lacks it,
   3. push each submodule's pointer commit to its GitHub `origin`, then the
@@ -84,19 +88,131 @@ def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
     )
 
 
-LOCAL_AHEAD_ADVICE = (
-    "Local main has commits that Gitea's main lacks. Run `git publish` -- it\n"
-    "syncs Gitea's main automatically before publishing."
+DECLINED_NOTICE = "Nothing was changed or published."
+
+MERGE_GITEA_EXPLANATION = (
+    "These local commits are already on GitHub -- most likely pushed to GitHub\n"
+    "directly and pulled into this checkout -- while Gitea separately picked up\n"
+    "new merges. Commits on GitHub can never be rewritten, so the two histories\n"
+    "are joined with a merge.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    '    git merge -m "Merge gitea main" {tip}'
 )
 
-DIVERGED_ADVICE = (
-    "Local main and Gitea's main have diverged: each has commits the other lacks.\n"
-    "Reconcile, then re-run `git publish`:\n"
-    "  - if your local-only main commits are NOT on GitHub origin yet:\n"
-    "      git pull --rebase gitea main && git push gitea main\n"
-    "  - if they already reached GitHub (rewriting them would break origin):\n"
-    "      git pull --no-rebase gitea main && git push gitea main"
+REBASE_EXPLANATION = (
+    "Local main has commits that Gitea is missing. This likely happened either\n"
+    "because you made manual commits, or because you merged Gitea commits from\n"
+    "a concurrent agent session. None of them are on GitHub yet, so they can be\n"
+    "replayed on top of Gitea's main, keeping history linear.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    "    git rebase {tip}"
 )
+
+MERGE_GITHUB_EXPLANATION = (
+    "GitHub has commits that never went through Gitea -- most likely someone\n"
+    "pushed to GitHub directly.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    '    git merge -m "Merge GitHub origin main" {tip}'
+)
+
+
+def confirm(question: str, explanation: str) -> bool:
+    """Interactive yes/no prompt, defaulting to yes; `?` prints the
+    explanation and asks again."""
+    while True:
+        answer = input(f"{question} [Y/n/?] ").strip().lower()
+        if answer == "?":
+            print(explanation)
+        else:
+            return answer not in ("n", "no")
+
+
+def print_commits(header: str, lines: list):
+    print(header)
+    for line in lines:
+        print(f"  {line}")
+
+
+def commits_beyond(repo: Path, tip: str, *excludes: str) -> list:
+    """Commits reachable from `tip` but from none of `excludes`, newest first,
+    as `<short-hash> <subject>` display lines."""
+    out = git_out(repo, "log", "--format=%h %s", tip, *[f"^{e}" for e in excludes])
+    return out.splitlines() if out else []
+
+
+def merge_or_abort(repo: Path, tip: str, label: str):
+    """Merge `tip` into main; on conflicts, restore the checkout and bounce
+    the conflict resolution to the user."""
+    try:
+        git(repo, "merge", "-m", f"Merge {label}", tip)
+    except subprocess.CalledProcessError:
+        subprocess.run(["git", "merge", "--abort"], cwd=repo)
+        raise SystemExit(
+            f"The merge of {label} hit conflicts. It was aborted -- your checkout\n"
+            f"is unchanged. Run `git merge {tip[:12]}`, resolve the conflicts,\n"
+            "then re-run `git publish`."
+        ) from None
+
+
+def rebase_or_abort(repo: Path, tip: str):
+    """Rebase main onto `tip`; on conflicts, restore the checkout and bounce
+    the conflict resolution to the user."""
+    try:
+        git(repo, "rebase", tip)
+    except subprocess.CalledProcessError:
+        subprocess.run(["git", "rebase", "--abort"], cwd=repo)
+        raise SystemExit(
+            "The rebase onto Gitea's main hit conflicts. It was aborted -- your\n"
+            f"checkout is unchanged. Run `git rebase {tip[:12]}`, resolve the\n"
+            "conflicts, then re-run `git publish`."
+        ) from None
+
+
+def reconcile_diverged_gitea(repo_root: Path, gitea_tip: str, origin_tip: str):
+    """Reconcile a local `main` that has diverged from Gitea's.
+
+    The recipe follows one rule: never rewrite a commit another repository
+    already has. When some local-only commit is already on GitHub origin, a
+    rebase would mint new hashes for published history and the final
+    fast-forward push to origin would be rejected -- so merge. When every
+    local-only commit is still private, rebasing onto Gitea's main rewrites
+    nothing anyone else holds and keeps `main` linear."""
+    local_only = commits_beyond(repo_root, "main", gitea_tip)
+    private = set(commits_beyond(repo_root, "main", gitea_tip, origin_tip))
+    published = [line for line in local_only if line not in private]
+    if published:
+        print_commits("The following commits are on GitHub but are missing from Gitea:", published)
+        explanation = MERGE_GITEA_EXPLANATION.format(tip=gitea_tip[:12])
+        if not confirm("Merge Gitea's main into yours?", explanation):
+            raise SystemExit(DECLINED_NOTICE)
+        merge_or_abort(repo_root, gitea_tip, "gitea main")
+    else:
+        print_commits("Gitea is missing the following local-only commits:", local_only)
+        explanation = REBASE_EXPLANATION.format(tip=gitea_tip[:12])
+        if not confirm("Rebase them onto Gitea's main?", explanation):
+            raise SystemExit(DECLINED_NOTICE)
+        rebase_or_abort(repo_root, gitea_tip)
+
+
+def merge_github_only_commits(repo_root: Path, origin_tip: str):
+    """Fold in commits that reached GitHub origin outside the Gitea flow."""
+    github_only = commits_beyond(repo_root, origin_tip, "main")
+    if not github_only:
+        return
+    print_commits(
+        "The following commits are on GitHub but are missing from Gitea and your main:",
+        github_only,
+    )
+    explanation = MERGE_GITHUB_EXPLANATION.format(tip=origin_tip[:12])
+    if not confirm("Merge them into your main?", explanation):
+        raise SystemExit(DECLINED_NOTICE)
+    merge_or_abort(repo_root, origin_tip, "GitHub origin main")
 
 
 def main_relationship(repo_root: Path, gitea_main: str) -> str:
@@ -113,26 +229,34 @@ def main_relationship(repo_root: Path, gitea_main: str) -> str:
     return "diverged"
 
 
-def fast_forward_main(repo_root: Path):
-    """Bring the local `main` and Gitea's `main` to the same tip.
+def sync_main(repo_root: Path):
+    """Bring the local `main` into agreement with Gitea's and GitHub's.
 
-    Publishing flows Gitea -> local -> GitHub. The normal case fast-forwards
-    the local `main` to Gitea's. A local `main` that is *ahead* (a direct
-    commit whose commit_guard mirror push didn't land, e.g. the service was
-    down) is a guaranteed fast-forward for Gitea, so it is synced here rather
-    than bounced back to the user. Divergence is the one state that needs a
-    human: refuse with the reconciliation recipes."""
+    Publishing flows Gitea -> local -> GitHub, so the normal case fast-forwards
+    the local `main` to Gitea's tip. Two abnormal states are reconciled
+    interactively: a local `main` that diverged from Gitea's (see
+    reconcile_diverged_gitea for the merge-vs-rebase choice), and commits that
+    reached GitHub outside the Gitea flow (merge is the only option for those:
+    they can never be rewritten). The rebase runs before the GitHub merge so
+    private commits are linearized first. Afterwards Gitea is brought up to
+    the reconciled `main` -- which also covers a `main` that was simply ahead
+    (a direct commit whose commit_guard mirror push didn't land) -- so the
+    GitHub pushes that follow are guaranteed fast-forwards."""
     if git_out(repo_root, "branch", "--show-current") != "main":
         raise SystemExit("git publish must run on `main`; check it out first.")
     git(repo_root, "fetch", gitea_read_url(repo_root), "main")
-    relation = main_relationship(repo_root, git_out(repo_root, "rev-parse", "FETCH_HEAD"))
-    if relation == "diverged":
-        raise SystemExit(DIVERGED_ADVICE)
-    if relation == "ahead":
-        print("Local main is ahead of Gitea's; syncing Gitea first...")
+    gitea_tip = git_out(repo_root, "rev-parse", "FETCH_HEAD")
+    git(repo_root, "fetch", "origin", "main")
+    origin_tip = git_out(repo_root, "rev-parse", "FETCH_HEAD")
+    relation = main_relationship(repo_root, gitea_tip)
+    if relation == "behind":
+        git(repo_root, "merge", "--ff-only", gitea_tip)
+    elif relation == "diverged":
+        reconcile_diverged_gitea(repo_root, gitea_tip, origin_tip)
+    merge_github_only_commits(repo_root, origin_tip)
+    if git_out(repo_root, "rev-parse", "main") != gitea_tip:
+        print("Syncing Gitea's main to the local main...")
         git(repo_root, "push", REMOTE_NAME, "main")
-    else:
-        git(repo_root, "merge", "--ff-only", "FETCH_HEAD")
 
 
 def sync_submodule(repo_root: Path, sub_path: str):
@@ -193,8 +317,8 @@ def publish(repo_root: Path):
             "git publish runs on the HOST, where the GitHub credentials live -- not in "
             "the container. Accept PRs in the container/browser; publish from the host."
         )
-    print("Fast-forwarding local main from Gitea...")
-    fast_forward_main(repo_root)
+    print("Syncing local main with Gitea and GitHub...")
+    sync_main(repo_root)
     entries = gitmodule_entries(repo_root)
     for _, sub_path in entries:
         sync_submodule(repo_root, sub_path)

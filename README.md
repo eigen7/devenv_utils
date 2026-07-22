@@ -67,7 +67,10 @@ mostly invisible. A typical change:
 4. On the host, run **`git publish`** to publish the merge to GitHub. It
    fast-forwards your local checkout to the merged state, pushes to GitHub (and,
    for a change that spans a submodule, pushes the submodule commit first, in the
-   order upstream requires), and removes the merged worktree.
+   order upstream requires), and removes the merged worktree. If histories have
+   drifted — your `main` diverged from Gitea's, or commits reached GitHub around
+   the Gitea flow — it shows the affected commits and asks before merging or
+   rebasing (`?` at the prompt explains the proposed action).
 
 Why a dedicated `git publish` rather than `git push`? Merging on Gitea only
 advances Gitea's copy — the merge commit isn't in your local checkout yet, so a
