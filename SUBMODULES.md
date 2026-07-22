@@ -57,10 +57,12 @@ git add submodules/<name>
 
 A submodule PR merges on its own, leaving the superproject's recorded pointer
 naming the pre-merge commit until some superproject commit bumps it. `git
-publish` offers to commit that bump so the same run pushes it. To make the same
-offer on demand, without publishing, run
-`submodules/devenv_utils/update_submodules.py` -- it lists any submodule whose
-Gitea `main` is ahead and asks whether to commit the pointer bump.
+publish` offers to commit that bump so the same run pushes it. To pull in a
+submodule commit that another consumer project already published,
+`submodules/devenv_utils/update_submodules.py` offers the same bump on demand --
+but only for tips already on the submodule's GitHub origin, and it refuses to
+run unless the superproject is on `main`, clean, and sitting at its remote head
+(everything published), directing you to `git publish` otherwise.
 
 ## Cloning and initialization
 
