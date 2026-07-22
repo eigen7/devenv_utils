@@ -24,6 +24,16 @@ each action here closes one:
       -- populating a fresh worktree is pr_flow.py's job (it clones from the
       main checkout, covering pointers whose commit is not upstream yet),
       and setup_common self-heals fresh clones.
+
+  offer-update (`offer-update`): from post-merge, when a `git pull` merged
+      something, check each submodule's Gitea main against the recorded
+      pointer and react per the [submodules] pull_update mode -- "prompt"
+      (offer the bump over /dev/tty), "always" (bump without asking), or
+      "never" (print a one-line note). Runs only on the `main` branch of a
+      checkout with a `gitea` remote, and never fails the hook: post-merge
+      cannot undo the merge, so every problem is at most a warning, and a
+      non-interactive pull (no /dev/tty) prints the note rather than blocking.
+      The bump logic itself is shared with `git publish` (see submodule_bump).
 """
 
 import sys
@@ -38,7 +48,23 @@ if __package__ in (None, ""):
 
 import subprocess
 
+from .commit_guard import guards_main
 from .config import DevenvConfig, load_config
+from .gitea_client import gitmodule_entries
+from .submodule_bump import (
+    BumpOffer,
+    bump_commands_text,
+    bump_commit,
+    bump_header,
+    bump_question,
+    checked_out_head,
+    evaluate_bump,
+    has_uncommitted_changes,
+    never_note,
+    perform_note,
+    pull_update_mode,
+    save_pull_update_never,
+)
 
 GITLINK_MODE = "160000"
 
@@ -110,16 +136,6 @@ def recorded_pointers(repo_root: Path) -> list[tuple[str, str]]:
     return pointers
 
 
-def checked_out_head(submodule: Path) -> str | None:
-    """The submodule checkout's HEAD, or None when it is not populated."""
-    result = git_result(submodule, "rev-parse", "HEAD")
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def has_uncommitted_changes(submodule: Path) -> bool:
-    return bool(git_out(submodule, "status", "--porcelain", "--untracked-files=no").strip())
-
-
 def sync_one(repo_root: Path, path: str, recorded: str):
     """Bring one stale submodule checkout to the recorded pointer, or explain
     why it was left alone."""
@@ -145,9 +161,122 @@ def sync(repo_root: Path):
             sync_one(repo_root, path, recorded)
 
 
+SAVE_QUESTION = 'You selected no. Save this selection for future "git pull" calls?'
+
+SAVE_EXPLANATION = (
+    'Answering Y writes pull_update = "never" under [submodules] in devenv.toml.\n'
+    "Future `git pull`s then print a one-line note when this submodule's Gitea main\n"
+    "is ahead, instead of prompting."
+)
+
+
+def hook_bump_explanation(offer: BumpOffer) -> str:
+    return (
+        f"The {offer.name} submodule's Gitea main has commits the superproject's\n"
+        "recorded pointer does not include yet -- typically a submodule PR that just\n"
+        "merged. Answering Y checks the submodule out at that tip and commits the\n"
+        "pointer bump on main; the post-commit hook mirrors it to your Gitea main.\n"
+        "\n"
+        "Proceeding with Y runs the commands:\n"
+        "\n"
+        f"{bump_commands_text(offer.name, offer.sub_path, offer.tip)}"
+    )
+
+
+def open_tty():
+    """The controlling terminal, for prompting from inside a hook (stdin is not
+    the terminal there). None when there is none -- a scripted, CI, or
+    agent-driven pull -- so the caller falls back to a non-interactive note
+    instead of blocking."""
+    try:
+        return open("/dev/tty", "r+")
+    except OSError:
+        return None
+
+
+def tty_prompt(tty, question: str, explanation: str) -> bool:
+    """A yes/no prompt over the terminal `tty`, defaulting to yes; `?` prints
+    the explanation and asks again. Mirrors publish.confirm's house style with
+    terminal I/O rather than stdin."""
+    while True:
+        tty.write(f"{question} [Y/n/?] ")
+        tty.flush()
+        answer = tty.readline().strip().lower()
+        if answer == "?":
+            tty.write(explanation + "\n")
+            tty.flush()
+        else:
+            return answer not in ("n", "no")
+
+
+def write_commits(tty, header: str, lines: list):
+    tty.write(header + "\n")
+    for line in lines:
+        tty.write(f"  {line}\n")
+    tty.flush()
+
+
+def perform_bump(repo_root: Path, offer: BumpOffer):
+    bump_commit(offer, repo_root)
+    print(perform_note(offer.name, offer.tip))
+
+
+def prompt_bump(repo_root: Path, offer: BumpOffer):
+    """Offer the bump over the terminal. Declining offers to persist "never" so
+    future pulls stop asking. With no terminal, print the note and return --
+    a non-interactive pull must never block."""
+    tty = open_tty()
+    if tty is None:
+        print(never_note(offer.name, offer.recorded, offer.tip))
+        return
+    try:
+        write_commits(tty, bump_header(offer), list(offer.spanned))
+        if tty_prompt(tty, bump_question(offer), hook_bump_explanation(offer)):
+            perform_bump(repo_root, offer)
+        elif tty_prompt(tty, SAVE_QUESTION, SAVE_EXPLANATION):
+            save_pull_update_never(repo_root / "devenv.toml")
+            print('Wrote pull_update = "never" to devenv.toml; commit it when you like.')
+    finally:
+        tty.close()
+
+
+def react_to_bump(repo_root: Path, name: str, sub_path: str, mode: str):
+    """React to one submodule's freshness per `mode`: nothing when the pointer
+    is current, a warning when it cannot be bumped safely, else the mode's
+    action (note / bump / prompt)."""
+    offer = evaluate_bump(repo_root, name, sub_path)
+    if offer is None or offer.status == "none":
+        return
+    if offer.status in ("diverged", "unsafe"):
+        warn(offer.warning)
+        return
+    if mode == "never":
+        print(never_note(offer.name, offer.recorded, offer.tip))
+    elif mode == "always":
+        perform_bump(repo_root, offer)
+    else:
+        prompt_bump(repo_root, offer)
+
+
+def offer_update(repo_root: Path):
+    """The post-merge freshness action: react to each submodule whose Gitea main
+    is ahead of the recorded pointer. A no-op off `main` or without a `gitea`
+    remote. Never fails the hook -- a merge cannot be undone -- so any per-
+    submodule error is downgraded to a warning."""
+    if not guards_main(repo_root):
+        return
+    mode = pull_update_mode(repo_root)
+    for name, sub_path in gitmodule_entries(repo_root):
+        try:
+            react_to_bump(repo_root, name, sub_path, mode)
+        except Exception as err:  # noqa: BLE001 -- a hook must never break the pull.
+            warn(f"{name}: could not check submodule freshness: {err}")
+
+
 ACTIONS = {
     "pre-commit": check,
     "sync": sync,
+    "offer-update": offer_update,
 }
 
 

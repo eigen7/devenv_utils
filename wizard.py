@@ -79,13 +79,21 @@ class SetupWizardTool:
     # prepush_guard.py steers a stray `git push` to GitHub origin back to
     # `git publish`; commit_guard.py keeps direct commits on `main` in
     # lockstep with Gitea; submodule_guard.py blocks backward submodule
-    # pointer moves and re-syncs stale submodule checkouts after
-    # rebase/merge (see each script's docstring).
+    # pointer moves, re-syncs stale submodule checkouts after rebase/merge,
+    # and (offer-update, post-merge only) reacts when a pulled-in merge left a
+    # submodule's Gitea main ahead of the recorded pointer -- see each
+    # script's docstring. offer-update is a network probe, so it runs on
+    # post-merge (which fires only when a pull actually merges) but not on
+    # post-checkout (which fires on every checkout).
     GIT_HOOKS = {
         "pre-push": [("prepush_guard.py", ' "$@"')],
         "pre-commit": [("commit_guard.py", " pre-commit"), ("submodule_guard.py", " pre-commit")],
         "post-commit": [("commit_guard.py", " post-commit")],
-        "post-merge": [("commit_guard.py", " post-merge"), ("submodule_guard.py", " sync")],
+        "post-merge": [
+            ("commit_guard.py", " post-merge"),
+            ("submodule_guard.py", " sync"),
+            ("submodule_guard.py", " offer-update"),
+        ],
         "post-checkout": [("submodule_guard.py", " sync")],
     }
 
