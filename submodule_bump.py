@@ -99,14 +99,26 @@ def submodule_gitea_tip(repo_root: Path, sub_path: str) -> str | None:
     return git_out(sub, "rev-parse", "FETCH_HEAD")
 
 
+def trees_equal(sub: Path, a: str, b: str) -> bool:
+    """Whether commits `a` and `b` have identical trees -- same content, so a
+    move from one to the other carries no change."""
+    return git_out(sub, "rev-parse", f"{a}^{{tree}}") == git_out(sub, "rev-parse", f"{b}^{{tree}}")
+
+
 def bump_status(sub: Path, recorded: str, tip: str) -> str:
     """How the recorded pointer relates to the Gitea `tip`: 'none' (the pointer
     already contains the tip, or is ahead of it -- nothing to do), 'ahead' (the
-    tip has commits the pointer lacks -- a bump is available), or 'diverged'."""
+    tip has commits the pointer lacks -- a bump is available), or 'diverged'.
+
+    A tip strictly ahead of the pointer but with an identical tree counts as
+    'none': it is a content-free merge commit (Gitea's merge-style plumbing over
+    the very commit the pointer already records), so there is nothing to bump
+    to. A tip whose tree differs -- real commits, or a merge that carries
+    content -- is a genuine 'ahead'."""
     if tip == recorded or is_ancestor(sub, tip, recorded):
         return "none"
     if is_ancestor(sub, recorded, tip):
-        return "ahead"
+        return "ahead" if not trees_equal(sub, recorded, tip) else "none"
     return "diverged"
 
 

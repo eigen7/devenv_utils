@@ -236,7 +236,14 @@ def sync_main(repo_root: Path):
     merge_github_only_commits(repo_root, origin_tip)
     if git_out(repo_root, "rev-parse", "main") != gitea_tip:
         print("Syncing Gitea's main to the local main...")
-        git(repo_root, "push", REMOTE_NAME, "main")
+        # --recurse-submodules=no: this mirrors `main` to the same-machine Gitea
+        # service, whose submodule commits all came from Gitea merges. The
+        # submodule origin pushes happen later in publish (publish_submodule), so
+        # a referenced submodule commit can still be a fetched object in no
+        # remote-tracking ref here; push.recurseSubmodules=check -- which guards
+        # the GitHub publishing invariant, not this local mirror -- would
+        # otherwise abort it.
+        git(repo_root, "push", "--recurse-submodules=no", REMOTE_NAME, "main")
 
 
 def sync_submodule(repo_root: Path, sub_path: str):
