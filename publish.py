@@ -91,24 +91,34 @@ def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
 DECLINED_NOTICE = "Nothing was changed or published."
 
 MERGE_GITEA_EXPLANATION = (
-    "Runs `git merge` of Gitea's main into yours. A merge rewrites nothing, so\n"
-    "the commits GitHub already holds keep their hashes and the upcoming push\n"
-    "to GitHub stays a plain fast-forward. (A rebase here would mint new\n"
-    "hashes for published commits, and GitHub would reject the result.)"
+    "These local commits are already on GitHub -- most likely pushed to GitHub\n"
+    "directly and pulled into this checkout -- while Gitea separately picked up\n"
+    "new merges. Commits on GitHub can never be rewritten, so the two histories\n"
+    "are joined with a merge.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    '    git merge -m "Merge gitea main" {tip}'
 )
 
 REBASE_EXPLANATION = (
-    "Runs `git rebase`, re-creating the listed commits on top of Gitea's main\n"
-    "so that main stays linear. Safe because no other repository has these\n"
-    "commits -- GitHub was checked -- so the rewrite is invisible outside\n"
-    "this checkout."
+    "Local main has commits that Gitea is missing. This likely happened either\n"
+    "because you made manual commits, or because you merged Gitea commits from\n"
+    "a concurrent agent session. None of them are on GitHub yet, so they can be\n"
+    "replayed on top of Gitea's main, keeping history linear.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    "    git rebase {tip}"
 )
 
 MERGE_GITHUB_EXPLANATION = (
-    "Runs `git merge` of GitHub's main into yours, then syncs Gitea. These\n"
-    "commits reached GitHub outside the Gitea flow (someone pushed to origin\n"
-    "directly); merging folds them in without rewriting anything, and the\n"
-    "upcoming push to GitHub stays a plain fast-forward."
+    "GitHub has commits that never went through Gitea -- most likely someone\n"
+    "pushed to GitHub directly.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    '    git merge -m "Merge GitHub origin main" {tip}'
 )
 
 
@@ -178,12 +188,14 @@ def reconcile_diverged_gitea(repo_root: Path, gitea_tip: str, origin_tip: str):
     published = [line for line in local_only if line not in private]
     if published:
         print_commits("The following commits are on GitHub but are missing from Gitea:", published)
-        if not confirm("Merge Gitea's main into yours?", MERGE_GITEA_EXPLANATION):
+        explanation = MERGE_GITEA_EXPLANATION.format(tip=gitea_tip[:12])
+        if not confirm("Merge Gitea's main into yours?", explanation):
             raise SystemExit(DECLINED_NOTICE)
         merge_or_abort(repo_root, gitea_tip, "gitea main")
     else:
         print_commits("Gitea is missing the following local-only commits:", local_only)
-        if not confirm("Rebase them onto Gitea's main?", REBASE_EXPLANATION):
+        explanation = REBASE_EXPLANATION.format(tip=gitea_tip[:12])
+        if not confirm("Rebase them onto Gitea's main?", explanation):
             raise SystemExit(DECLINED_NOTICE)
         rebase_or_abort(repo_root, gitea_tip)
 
@@ -197,7 +209,8 @@ def merge_github_only_commits(repo_root: Path, origin_tip: str):
         "The following commits are on GitHub but are missing from Gitea and your main:",
         github_only,
     )
-    if not confirm("Merge them into your main?", MERGE_GITHUB_EXPLANATION):
+    explanation = MERGE_GITHUB_EXPLANATION.format(tip=origin_tip[:12])
+    if not confirm("Merge them into your main?", explanation):
         raise SystemExit(DECLINED_NOTICE)
     merge_or_abort(repo_root, origin_tip, "GitHub origin main")
 

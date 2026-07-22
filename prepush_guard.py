@@ -32,15 +32,11 @@ from .gitea_client import SERVICE_CONTAINER
 from .publish import gitea_read_url, main_relationship
 from .state import in_docker_container
 
-LOCAL_AHEAD_ADVICE = (
-    "Local main has commits that Gitea's main lacks. Run `git publish` -- it\n"
-    "syncs Gitea's main automatically before publishing."
-)
+LOCAL_AHEAD_ADVICE = "Local main has commits that Gitea's main lacks. Run `git publish`."
 
 DIVERGED_ADVICE = (
     "Local main and Gitea's main have diverged: each has commits the other lacks.\n"
-    "Run `git publish` -- it works out the safe reconciliation (merge vs rebase),\n"
-    "asks before acting, and then publishes."
+    "Run `git publish`."
 )
 
 
@@ -78,8 +74,7 @@ def main(cfg: DevenvConfig):
     relation = main_relationship(root, gitea_main)
     if relation == "behind":
         sys.exit(
-            "Gitea's main has merged commits your local main doesn't have yet.\n"
-            "Run `git publish` -- it fast-forwards, publishes to origin, and cleans up."
+            "Gitea's main has merged commits your local main doesn't have yet.\nRun `git publish`."
         )
     if relation == "ahead":
         sys.exit(LOCAL_AHEAD_ADVICE)
