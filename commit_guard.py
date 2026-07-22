@@ -124,8 +124,15 @@ def sync(repo_root: Path):
     """
     if not guards_main(repo_root):
         return
+    # --recurse-submodules=no: this is a same-machine mirror of `main` to the
+    # local Gitea service, and every submodule commit `main` references came
+    # from a Gitea merge, so it is already on Gitea. push.recurseSubmodules=check
+    # exists to protect the GitHub publishing invariant (never push a
+    # superproject commit whose submodule commit GitHub lacks); it would
+    # otherwise abort this mirror whenever a just-recorded submodule commit sits
+    # in the submodule clone only as a fetched object, in no remote-tracking ref.
     result = subprocess.run(
-        ["git", "push", "--quiet", REMOTE_NAME, "main"],
+        ["git", "push", "--quiet", "--recurse-submodules=no", REMOTE_NAME, "main"],
         capture_output=True,
         text=True,
         cwd=repo_root,
