@@ -53,6 +53,52 @@ git -C submodules/<name> pull origin main
 git add submodules/<name>
 ```
 
+## Keeping the recorded pointer current
+
+A submodule PR merges on its own -- the superproject's recorded pointer still
+names the pre-merge commit until some superproject commit bumps it. Two
+conveniences offer that bump so a separate pointer-only PR is never needed.
+
+**At publish time.** When `git publish` runs, after it syncs each submodule
+checkout to the recorded pointer and before it pushes, it compares each
+submodule's Gitea `main` with the recorded pointer. When Gitea's `main` is
+strictly ahead (a merged submodule PR the pointer hasn't caught up to), it lists
+the spanned commits and offers to bump: answering yes checks the submodule out
+at that tip and commits the pointer bump on `main`, which the same publish run
+then pushes -- submodule commit first, so `push.recurseSubmodules=check` holds.
+Declining continues the publish; the offer is a convenience, not a gate. A
+diverged history, a dirty submodule checkout, or an unreachable Gitea skips the
+offer with at most a warning.
+
+**At pull time.** When a `git pull` on `main` merges something, a post-merge
+hook makes the same comparison and reacts per the `[submodules] pull_update`
+knob (below). In `"prompt"` mode it lists the spanned commits and asks over the
+terminal; answering yes commits the pointer bump on `main` (the commit-mirror
+hook forwards it to your Gitea `main`). Answering no offers to remember the
+choice as `pull_update = "never"`. This check runs only when the pull actually
+merges: an "Already up to date" pull and `git pull --rebase` do not fire the
+post-merge hook, so they never prompt.
+
+### The `[submodules] pull_update` knob
+
+A `[submodules]` table in the consumer's `devenv.toml` sets how a pull reacts
+to a submodule whose Gitea `main` is ahead of the recorded pointer:
+
+```
+[submodules]
+pull_update = "prompt"
+```
+
+* `"prompt"` (the default when unset) -- list the spanned commits and ask over
+  the terminal. A non-interactive pull (no controlling terminal: scripts, CI,
+  agent-driven pulls) never blocks; it prints a one-line note instead.
+* `"never"` -- print a one-line note that a bump is available and take no
+  action.
+* `"always"` -- commit the pointer bump without asking.
+
+`devenv.toml` is tracked, so a `pull_update` written by the "remember my choice"
+path is yours to commit.
+
 ## Cloning and initialization
 
 A plain `git clone` of a consumer repo leaves submodule directories empty.
