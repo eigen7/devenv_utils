@@ -1,5 +1,5 @@
 """Advance a superproject's recorded submodule pointer to the submodule's
-Gitea `main` tip -- the shared logic behind two conveniences.
+Gitea `main` tip -- the shared logic behind two entry points.
 
 The recorded pointer (the gitlink in the superproject's HEAD) lags a
 submodule's Gitea `main` whenever a submodule-only PR has merged but no
@@ -8,21 +8,19 @@ close that gap and share everything here:
 
   * `git publish` (publish.py) offers the bump right before it pushes, so the
     push ships it.
-  * the post-merge freshness hook (submodule_guard.py) reacts when a `git
-    pull` brought in a merge.
+  * `update_submodules.py` offers the same bump on demand, independently of a
+    publish.
 
-They differ only in how they prompt; the freshness check, the spanned-commit
-listing, the safety checks, and the bump-commit creation live here once.
+They differ only in how they frame the prompt; the freshness check, the
+spanned-commit listing, the safety checks, and the bump-commit creation live
+here once.
 """
 
-import re
 import subprocess
-import tomllib
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import load_config
 from .gitea_client import REMOTE_NAME
 from .pr_flow import submodule_pointer
 
@@ -195,20 +193,6 @@ def bump_commands_text(name: str, sub_path: str, tip: str) -> str:
     )
 
 
-def perform_note(name: str, tip: str) -> str:
-    """The one-line notice printed after a bump is committed."""
-    return f"Updated {name} submodule to {short(tip)} and committed the pointer bump on main."
-
-
-def never_note(name: str, recorded: str, tip: str) -> str:
-    """The one-line notice printed when a bump is available but not acted on."""
-    return (
-        f"Note: {name} has new upstream commits ({short(recorded)}..{short(tip)}). "
-        'Set pull_update = "prompt" or "always" under [submodules] in devenv.local.toml '
-        "to act on this during git pull."
-    )
-
-
 def bump_commit(offer: BumpOffer, repo_root: Path):
     """Check the submodule out at the tip and record the pointer bump on the
     superproject's `main`.
@@ -222,43 +206,3 @@ def bump_commit(offer: BumpOffer, repo_root: Path):
     subject = f"Bump {offer.name} submodule to {short(offer.tip)}"
     message = subject + "\n\n" + "\n".join(offer.spanned) + "\n"
     git(repo_root, "commit", "-m", message, "--", offer.sub_path)
-
-
-def pull_update_mode(repo_root: Path) -> str:
-    """The [submodules] pull_update mode from devenv.toml, read leniently: a
-    missing, unparseable, or invalid file falls back to "prompt", so a hook
-    never breaks a `git pull` over a config problem."""
-    try:
-        return load_config(repo_root).submodules.pull_update
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
-        return "prompt"
-
-
-_SUBMODULES_TABLE_RE = re.compile(r"^\[submodules\][ \t]*$", re.MULTILINE)
-_PULL_UPDATE_LINE_RE = re.compile(r"^([ \t]*pull_update[ \t]*=).*$", re.MULTILINE)
-
-
-def save_pull_update_never(local_toml: Path):
-    """Persist `pull_update = "never"` under `[submodules]` in `local_toml` (the
-    untracked devenv.local.toml override), preserving every other byte.
-
-    A missing file is created holding just the `[submodules]` table. Within an
-    existing file the write is table-aware, since appending a bare `key = value`
-    at end-of-file would land the key inside whatever table happens to be last:
-    a `pull_update` line is rewritten in place, a bare `[submodules]` table gains
-    the key under its header, and an absent table is appended whole.
-    """
-    if not local_toml.exists():
-        local_toml.write_text('[submodules]\npull_update = "never"\n')
-        return
-    text = local_toml.read_text()
-    if _SUBMODULES_TABLE_RE.search(text):
-        if _PULL_UPDATE_LINE_RE.search(text):
-            text = _PULL_UPDATE_LINE_RE.sub(r'\1 "never"', text, count=1)
-        else:
-            text = _SUBMODULES_TABLE_RE.sub('[submodules]\npull_update = "never"', text, count=1)
-    else:
-        if text and not text.endswith("\n"):
-            text += "\n"
-        text += '\n[submodules]\npull_update = "never"\n'
-    local_toml.write_text(text)

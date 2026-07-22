@@ -144,5 +144,3 @@ remaining symptoms mean and what to do about them:
 - **[GITEA.md](GITEA.md)** — how the machine-wide Gitea service container works
   (design, URLs, auth, lifecycle, migration).
 - **[SUBMODULES.md](SUBMODULES.md)** — rules for changing this submodule.
-- **[USER_CONFIG.md](USER_CONFIG.md)** — the untracked `devenv.local.toml`
-  override layer and the `[submodules] pull_update` knob.
