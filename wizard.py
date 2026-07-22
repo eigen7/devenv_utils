@@ -116,6 +116,8 @@ class SetupWizardTool:
           in lockstep with Gitea, and the submodule_guard hooks (backward
           pointer moves blocked at commit time; stale submodule checkouts
           re-synced after rebase/merge).
+        - a .git/info/exclude entry for devenv.local.toml, the untracked local
+          config override load_config overlays onto devenv.toml.
 
         Clears core.hooksPath so git uses the repo's default hooks directory,
         where the hooks are installed.
@@ -132,7 +134,21 @@ class SetupWizardTool:
             subprocess.run(["git", "config", key, value], cwd=repo_root, check=True)
         subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo_root, check=False)
         self._install_git_hooks(repo_root)
+        self._exclude_local_config(repo_root)
         print_green("Configured git for submodule syncing, `git publish`, and the workflow hooks.")
+
+    @staticmethod
+    def _git_common_dir(repo_root: Path) -> Path:
+        """The repo's shared `.git` common directory -- one per repo, shared by
+        every worktree, holding the hooks and info/exclude that apply repo-wide."""
+        out = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return Path(out)
 
     @classmethod
     def _install_git_hooks(cls, repo_root: Path):
@@ -143,14 +159,7 @@ class SetupWizardTool:
         worktree whose pinned devenv_utils predates a given script must be
         tolerated: the hook no-ops when the script doesn't exist there.
         """
-        common_dir = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        hooks_dir = Path(common_dir) / "hooks"
+        hooks_dir = cls._git_common_dir(repo_root) / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         for name, entries in cls.GIT_HOOKS.items():
             lines = ["#!/bin/sh", 'top="$(git rev-parse --show-toplevel)"']
@@ -160,6 +169,27 @@ class SetupWizardTool:
             hook = hooks_dir / name
             hook.write_text("\n".join(lines) + "\n")
             hook.chmod(0o755)
+
+    # The untracked per-checkout config override load_config overlays onto
+    # devenv.toml. It is ignored via .git/info/exclude rather than a tracked
+    # .gitignore, so the ignore is local to the clone and no tracked file changes.
+    LOCAL_CONFIG_FILENAME = "devenv.local.toml"
+
+    @classmethod
+    def _exclude_local_config(cls, repo_root: Path):
+        """Idempotently list devenv.local.toml in the repo's .git/info/exclude,
+        so the untracked local override is ignored without editing a tracked
+        .gitignore. The common dir is shared across worktrees, so one entry
+        covers them all."""
+        exclude = cls._git_common_dir(repo_root) / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        lines = exclude.read_text().splitlines() if exclude.exists() else []
+        if cls.LOCAL_CONFIG_FILENAME in lines:
+            return
+        with exclude.open("a", encoding="utf-8") as f:
+            if lines and lines[-1] != "":
+                f.write("\n")
+            f.write(cls.LOCAL_CONFIG_FILENAME + "\n")
 
     # ---- Step: Gitea service -------------------------------------------
 

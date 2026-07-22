@@ -164,9 +164,9 @@ def sync(repo_root: Path):
 SAVE_QUESTION = 'You selected no. Save this selection for future "git pull" calls?'
 
 SAVE_EXPLANATION = (
-    'Answering Y writes pull_update = "never" under [submodules] in devenv.toml.\n'
-    "Future `git pull`s then print a one-line note when this submodule's Gitea main\n"
-    "is ahead, instead of prompting."
+    'Answering Y writes pull_update = "never" under [submodules] in devenv.local.toml,\n'
+    "the untracked local override. Future `git pull`s then print a one-line note when\n"
+    "this submodule's Gitea main is ahead, instead of prompting."
 )
 
 
@@ -234,8 +234,8 @@ def prompt_bump(repo_root: Path, offer: BumpOffer):
         if tty_prompt(tty, bump_question(offer), hook_bump_explanation(offer)):
             perform_bump(repo_root, offer)
         elif tty_prompt(tty, SAVE_QUESTION, SAVE_EXPLANATION):
-            save_pull_update_never(repo_root / "devenv.toml")
-            print('Wrote pull_update = "never" to devenv.toml; commit it when you like.')
+            save_pull_update_never(repo_root / "devenv.local.toml")
+            print('Wrote pull_update = "never" to devenv.local.toml (untracked local override).')
     finally:
         tty.close()
 

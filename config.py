@@ -175,8 +175,16 @@ _PATH_FIELDS = frozenset(
 )
 
 
+def _toml_kwargs(repo_root: Path, toml_path: Path) -> dict:
+    """The DevenvConfig kwargs a single TOML file contributes: each top-level key
+    as-is, with path-valued keys resolved relative to `repo_root`."""
+    data = tomllib.loads(toml_path.read_text())
+    return {k: (repo_root / v if k in _PATH_FIELDS else v) for k, v in data.items()}
+
+
 def load_config(repo_root: Path) -> DevenvConfig:
-    """Build a DevenvConfig from `repo_root`/devenv.toml.
+    """Build a DevenvConfig from `repo_root`/devenv.toml, overlaid by an optional
+    `repo_root`/devenv.local.toml.
 
     devenv.toml holds the static DevenvConfig fields as data, so a generic
     devenv_utils entry point can construct the config knowing only where the
@@ -184,7 +192,15 @@ def load_config(repo_root: Path) -> DevenvConfig:
     field; path-valued keys are resolved relative to `repo_root`, and
     `repo_root` itself always comes from the caller (the file's directory),
     never from the file.
+
+    devenv.local.toml, when present, is an untracked per-checkout override with
+    the same schema. Its top-level keys replace devenv.toml's wholesale -- a
+    table such as [submodules] supersedes the tracked one entirely, not
+    key-by-key -- so a developer can pin local-only settings without touching
+    the tracked file.
     """
-    data = tomllib.loads((repo_root / "devenv.toml").read_text())
-    kwargs = {k: (repo_root / v if k in _PATH_FIELDS else v) for k, v in data.items()}
+    kwargs = _toml_kwargs(repo_root, repo_root / "devenv.toml")
+    local = repo_root / "devenv.local.toml"
+    if local.exists():
+        kwargs.update(_toml_kwargs(repo_root, local))
     return DevenvConfig(repo_root=repo_root, **kwargs)

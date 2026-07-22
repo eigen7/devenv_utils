@@ -204,7 +204,7 @@ def never_note(name: str, recorded: str, tip: str) -> str:
     """The one-line notice printed when a bump is available but not acted on."""
     return (
         f"Note: {name} has new upstream commits ({short(recorded)}..{short(tip)}). "
-        'Set pull_update = "prompt" or "always" under [submodules] in devenv.toml '
+        'Set pull_update = "prompt" or "always" under [submodules] in devenv.local.toml '
         "to act on this during git pull."
     )
 
@@ -238,16 +238,20 @@ _SUBMODULES_TABLE_RE = re.compile(r"^\[submodules\][ \t]*$", re.MULTILINE)
 _PULL_UPDATE_LINE_RE = re.compile(r"^([ \t]*pull_update[ \t]*=).*$", re.MULTILINE)
 
 
-def save_pull_update_never(devenv_toml: Path):
-    """Persist `pull_update = "never"` under `[submodules]` in devenv.toml,
-    preserving every other byte.
+def save_pull_update_never(local_toml: Path):
+    """Persist `pull_update = "never"` under `[submodules]` in `local_toml` (the
+    untracked devenv.local.toml override), preserving every other byte.
 
-    Appending a bare `key = value` at end-of-file would land the key inside
-    whatever table happens to be last, so the write is table-aware: a
-    `pull_update` line is rewritten in place, a bare `[submodules]` table gains
+    A missing file is created holding just the `[submodules]` table. Within an
+    existing file the write is table-aware, since appending a bare `key = value`
+    at end-of-file would land the key inside whatever table happens to be last:
+    a `pull_update` line is rewritten in place, a bare `[submodules]` table gains
     the key under its header, and an absent table is appended whole.
     """
-    text = devenv_toml.read_text()
+    if not local_toml.exists():
+        local_toml.write_text('[submodules]\npull_update = "never"\n')
+        return
+    text = local_toml.read_text()
     if _SUBMODULES_TABLE_RE.search(text):
         if _PULL_UPDATE_LINE_RE.search(text):
             text = _PULL_UPDATE_LINE_RE.sub(r'\1 "never"', text, count=1)
@@ -257,4 +261,4 @@ def save_pull_update_never(devenv_toml: Path):
         if text and not text.endswith("\n"):
             text += "\n"
         text += '\n[submodules]\npull_update = "never"\n'
-    devenv_toml.write_text(text)
+    local_toml.write_text(text)
