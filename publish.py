@@ -54,6 +54,7 @@ from .submodule_bump import (
     gitea_read_url,
     is_ancestor,
     short,
+    submodule_gitea_tip,
 )
 from .worktrees import secondary_worktrees
 
@@ -278,7 +279,7 @@ def offer_pointer_bump(repo_root: Path, name: str, sub_path: str):
     bump on main, which the later `git push origin main` then ships -- after the
     submodule push, so push.recurseSubmodules is satisfied.
     """
-    offer = evaluate_bump(repo_root, name, sub_path)
+    offer = evaluate_bump(repo_root, name, sub_path, submodule_gitea_tip(repo_root, sub_path))
     if offer is None or offer.status == "none":
         return
     if offer.status in ("diverged", "unsafe"):

@@ -144,8 +144,8 @@ def unsafe_reason(name: str, sub: Path, recorded: str) -> str:
 
 @dataclass(frozen=True)
 class BumpOffer:
-    """The outcome of checking one submodule's recorded pointer against its
-    Gitea `main`. `status` drives what a caller does; the remaining fields carry
+    """The outcome of checking one submodule's recorded pointer against a
+    freshness tip. `status` drives what a caller does; the remaining fields carry
     what a caller needs to prompt and to build the bump commit.
 
     status is one of:
@@ -165,13 +165,14 @@ class BumpOffer:
     warning: str
 
 
-def evaluate_bump(repo_root: Path, name: str, sub_path: str) -> BumpOffer | None:
-    """Check one submodule's recorded pointer against its Gitea `main` tip.
+def evaluate_bump(repo_root: Path, name: str, sub_path: str, tip: str | None) -> BumpOffer | None:
+    """Classify a bump of the recorded pointer to `tip`, a freshness tip the
+    caller supplies -- the submodule's Gitea `main` for `git publish`, its GitHub
+    `origin` tip for update_submodules.
 
-    Returns None when there is nothing to consider (no reachable Gitea repo for
-    the submodule), otherwise a BumpOffer describing what to do.
+    A None `tip` (the caller could not reach the freshness source) yields None;
+    otherwise a BumpOffer describing what to do.
     """
-    tip = submodule_gitea_tip(repo_root, sub_path)
     if tip is None:
         return None
     recorded = submodule_pointer(repo_root, sub_path)
@@ -180,7 +181,7 @@ def evaluate_bump(repo_root: Path, name: str, sub_path: str) -> BumpOffer | None
     if status == "none":
         return BumpOffer("none", name, sub_path, recorded, tip, (), "")
     if status == "diverged":
-        warning = f"{name}: submodule Gitea main has diverged from the recorded pointer; skipping."
+        warning = f"{name}: the recorded pointer has diverged from the upstream tip; skipping."
         return BumpOffer("diverged", name, sub_path, recorded, tip, (), warning)
     warning = unsafe_reason(name, sub, recorded)
     if warning:
@@ -194,7 +195,7 @@ def bump_question(offer: BumpOffer) -> str:
 
 
 def bump_header(offer: BumpOffer) -> str:
-    return f"{offer.name}: submodule Gitea main is ahead of the recorded pointer:"
+    return f"{offer.name}: submodule upstream is ahead of the recorded pointer:"
 
 
 def bump_commands_text(name: str, sub_path: str, tip: str) -> str:

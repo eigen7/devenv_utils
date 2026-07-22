@@ -57,12 +57,14 @@ git add submodules/<name>
 
 A submodule PR merges on its own, leaving the superproject's recorded pointer
 naming the pre-merge commit until some superproject commit bumps it. `git
-publish` offers to commit that bump so the same run pushes it. To pull in a
-submodule commit that another consumer project already published,
-`submodules/devenv_utils/update_submodules.py` offers the same bump on demand --
-but only for tips already on the submodule's GitHub origin, and it refuses to
-run unless the superproject is on `main`, clean, and sitting at its remote head
-(everything published), directing you to `git publish` otherwise.
+publish` offers to commit that bump so the same run pushes it. To advance a
+pointer to the latest commit on a submodule's GitHub `origin` -- including one
+pushed to GitHub outside this machine's Gitea flow --
+`submodules/devenv_utils/update_submodules.py` offers the bump on demand. It
+sources the tip from `origin`, reports and refuses an unpublished Gitea merge,
+fast-forwards a lagging Gitea `main` up to `origin`, and refuses to run unless
+the superproject is on `main`, clean, and at its remote head -- directing you to
+`git publish` otherwise.
 
 ## Cloning and initialization
 
