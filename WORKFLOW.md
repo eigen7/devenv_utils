@@ -25,20 +25,33 @@ except `git publish`.
    commits from the user's. Worktrees live under the mount so in-progress work
    survives container relaunches.
 2. Make the changes in the worktree, as atomic commits reviewable in isolation.
-   A change that spans a submodule is committed twice: the commit inside
-   `submodules/<name>/`, and the superproject pointer bump (see SUBMODULES.md).
+   How a change that touches a submodule is committed depends on whether
+   consumer code depends on the new submodule code:
+   * **Submodule-only change** (nothing in the consumer needs the new submodule
+     code): commit *only* inside `submodules/<name>/`. Do not add a superproject
+     pointer-bump commit — the branch advances no consumer code, so it gets no
+     consumer PR; `git publish` offers the pointer bump after the submodule PR
+     merges (see SUBMODULES.md).
+   * **Coordinated change** (consumer code depends on the new submodule code):
+     commit twice — inside `submodules/<name>/`, and the superproject pointer
+     bump (`git add submodules/<name>`) — so the consumer PR is atomic and
+     builds against the submodule commit it needs.
 3. Before opening the PR: the affected test suites must pass and changed files
    must be formatter-clean. Say what was run in the PR body.
 4. `submodules/devenv_utils/pr_flow.py create <branch> --title ... --body-file ...`
-   — pushes the branch and opens its PR, **plus a PR in each submodule the
-   branch advances** (those merge first), as the `claude` Gitea user. It prints
-   the review + merge handoff; relay that to the user.
+   — opens **a PR in each submodule the branch advances** (those merge first)
+   as the `claude` Gitea user, and, when the branch also advances consumer code,
+   pushes the branch and opens its PR too. A submodule-only branch adds no
+   consumer commits, so no (empty) consumer PR is opened. It prints the review +
+   merge handoff; relay that to the user.
 5. Address review comments with follow-up commits — not squashes or
    force-pushes, which break the reviewer's "changes since last review" view.
 6. Once the user approves, they merge each PR on its Gitea page in the browser
    (or, in the container, `submodules/devenv_utils/gitea_merge.py <repo> <N>`).
-   A submodule-spanning change has a PR in each repo: merge the submodule's
-   first, then the consumer's. Then, on the host, they run `git publish`.
+   A coordinated change has a PR in each repo: merge the submodule's first, then
+   the consumer's. A submodule-only change has just the submodule PR: merge it,
+   and `git publish` offers the pointer bump. Then, on the host, they run
+   `git publish`.
 
 ## Accept vs publish
 

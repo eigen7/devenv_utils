@@ -120,6 +120,31 @@ def commit_present(repo: Path, sha: str) -> bool:
     )
 
 
+def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
+    """Whether `maybe_ancestor` is an ancestor of `of` in `repo`. A commit git
+    cannot resolve (absent from the checkout) counts as not-an-ancestor."""
+    return (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", maybe_ancestor, of],
+            cwd=repo,
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def branch_adds_commits(main: Path, branch: str, base: str = "main") -> bool:
+    """Whether `branch` carries commits `base` lacks.
+
+    False when the branch tip equals or trails `base` -- notably a
+    submodule-only change, whose commits live in the submodule repo with no
+    superproject pointer bump, leaves the consumer branch even with `main`. Such
+    a branch has nothing to review in the consumer repo, so no consumer PR is
+    opened (`git publish` offers the pointer bump after the submodule PR merges).
+    """
+    return bool(git_out(main, "rev-list", f"{base}..{branch}"))
+
+
 def local_branch_exists(main: Path, branch: str) -> bool:
     result = subprocess.run(
         ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main
@@ -226,17 +251,25 @@ def open_submodule_prs(
         sub = worktree / sub_path
         head = git_out(sub, "rev-parse", "HEAD")
         repo = gitea_repo_name(sub)
+        read_url = access.read_repo_url(owner, repo)
         listing = subprocess.run(
-            ["git", "ls-remote", access.read_repo_url(owner, repo), "main"],
+            ["git", "ls-remote", read_url, "main"],
             cwd=sub,
             capture_output=True,
             text=True,
         )
         gitea_main = listing.stdout.split()[0] if listing.returncode == 0 and listing.stdout else ""
-        if not gitea_main:
+        if gitea_main:
+            # Fetch Gitea's main so its tip is a local object the ancestry check
+            # below can resolve.
+            subprocess.run(["git", "fetch", "--quiet", read_url, "main"], cwd=sub, check=False)
+        else:
             gitea_main = submodule_pointer(primary, sub_path)
             seed_repo_main(access, owner, repo, admin, sub, gitea_main)
-        if head == gitea_main:
+        # Open a PR only when the submodule head truly has new commits -- i.e. it
+        # is not already contained in Gitea's main. A head that merely equals or
+        # trails Gitea's main (e.g. a stale checkout) has nothing to review.
+        if is_ancestor(sub, head, gitea_main):
             continue
         grant_claude_write(access, owner, repo, admin, claude)
         run(
@@ -273,6 +306,18 @@ def print_handoff(sub_prs: list[tuple[str, int, str]], repo: str, number: int, u
     print("Merge each on its page, or in the container: gitea_merge.py <repo> <N>.")
 
 
+def print_submodule_only_handoff(sub_prs: list[tuple[str, int, str]], repo: str):
+    """Handoff for a branch that advances only submodules: no consumer PR was
+    opened, so merge the submodule PR(s) and let `git publish` bump the
+    pointer."""
+    print(f"\nBranch adds no {repo} commits (submodule-only change), so no {repo} PR was opened.")
+    print("Review + merge the submodule PR(s) on Gitea, then run `git publish` on the host --")
+    print("it offers to bump the submodule pointer after the merge:")
+    for sub_repo, sub_number, sub_url in sub_prs:
+        print(f"  {sub_repo} #{sub_number}: {sub_url}")
+    print("Merge each on its page, or in the container: gitea_merge.py <repo> <N>.")
+
+
 def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
@@ -292,6 +337,20 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
         if worktree is not None
         else []
     )
+
+    # A branch that adds no consumer commits (a submodule-only change) has
+    # nothing to review in the consumer repo: skip the empty PR. The submodule
+    # PR(s) still open above, and `git publish` offers the pointer bump after
+    # they merge.
+    if not branch_adds_commits(main, args.branch):
+        if sub_prs:
+            print_submodule_only_handoff(sub_prs, cfg.name)
+        else:
+            print(
+                f"Branch {args.branch} adds no commits and touches no submodule; nothing to open."
+            )
+        print_stale_report(cfg)
+        return
 
     grant_claude_write(access, owner, cfg.name, admin, claude)
     # Pushing from the primary checkout satisfies push.recurseSubmodules=check:

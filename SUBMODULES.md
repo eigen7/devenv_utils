@@ -53,6 +53,17 @@ git -C submodules/<name> pull origin main
 git add submodules/<name>
 ```
 
+## Keeping the recorded pointer current
+
+A submodule PR merges on its own, leaving the superproject's recorded pointer
+naming the pre-merge commit until some superproject commit bumps it. `git
+publish` offers to commit that bump so the same run pushes it. To pull in a
+submodule commit that another consumer project already published,
+`submodules/devenv_utils/update_submodules.py` offers the same bump on demand --
+but only for tips already on the submodule's GitHub origin, and it refuses to
+run unless the superproject is on `main`, clean, and sitting at its remote head
+(everything published), directing you to `git publish` otherwise.
+
 ## Cloning and initialization
 
 A plain `git clone` of a consumer repo leaves submodule directories empty.
