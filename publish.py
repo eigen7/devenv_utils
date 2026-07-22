@@ -213,4 +213,10 @@ def main(cfg: DevenvConfig):
 
 
 if __name__ == "__main__":
-    main(load_config(Path(__file__).resolve().parents[2]))
+    try:
+        main(load_config(Path(__file__).resolve().parents[2]))
+    except subprocess.CalledProcessError as err:
+        # A failing git command has already printed its own diagnostics to
+        # stderr; a Python traceback on top of them is pure noise. Exit with
+        # the command's status instead.
+        raise SystemExit(err.returncode) from None
