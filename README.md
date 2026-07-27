@@ -95,13 +95,18 @@ two `main`s in lockstep so the PR flow and direct commits can't drift apart
 - A commit on `main` is **refused while Gitea holds merges you haven't
   published yet** — your change is still safely uncommitted at that point;
   run `git publish`, then commit. `git commit --no-verify` bypasses.
+- **Rewriting `main` mirrors too.** `git commit --amend` on a tip Gitea has
+  already mirrored replaces Gitea's copy, printing `mirrored rewritten main ->
+  gitea (replaced abc123def)`. Gitea's `main` only ever advances by a PR merge
+  or by this mirror, so a tip your own checkout wrote and then rewrote holds
+  nothing worth keeping.
+- The rewrite is **refused when GitHub already has the commit**, or when
+  nothing proves the commit came from this checkout. Published history is not
+  discardable, so `git publish` reports the divergence and lets you resolve it.
 - `git publish` handles the leftover case itself: if a mirror push didn't
   land (say, the service was down), publish syncs Gitea before publishing.
 
-One consequence: avoid `git commit --amend` / history rewrites on `main` —
-the tip is already mirrored, so the next mirror push will refuse and tell you
-how to reconcile. Feature branches and worktrees are untouched by all of
-this.
+Feature branches and worktrees are untouched by all of this.
 
 ## Submodules day to day
 
