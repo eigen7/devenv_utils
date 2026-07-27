@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
-"""Bump each submodule pointer to a submodule commit already published upstream.
+"""Bump each submodule pointer to the latest commit on its GitHub `origin`.
 
-The shared Gitea/GitHub devenv_utils repos mean a submodule commit another
-consumer project published reaches this project's Gitea `main` too, ahead of the
-recorded pointer. This script offers to advance the pointer to such a commit,
-on demand, from either side of Docker.
+For each submodule this script fetches the submodule's `origin` default branch --
+the authoritative "latest from remote", which also picks up commits pushed to
+GitHub outside this machine's Gitea flow -- and offers to advance the recorded
+pointer to it. It runs on demand, from either side of Docker.
 
 Its contract is narrow: it acts only from a superproject that is fully published
 and sitting at its remote head, and it refuses anything else. Before prompting
 it verifies the superproject is on `main`, has a clean tree, and has a local
 `main` equal to both its Gitea `main` and its GitHub `origin` main; any failure
 prints the reason and `Please run \\`git publish\\` and then retry.` and exits
-non-zero. Per submodule, a Gitea tip ahead of the pointer is offered only when
-that tip has reached the submodule's GitHub `origin` -- a tip that is merged on
-Gitea but not yet on `origin` is `git publish`'s job, so it is refused rather
-than offered. An unreachable `origin`, on either level, is refused too: this
-script exists to verify the published state, so it fails closed.
+non-zero.
+
+Gitea keeps three roles per submodule, all checked before any prompt:
+  * Unpublished-merge guard: if the submodule's Gitea `main` holds commits
+    `origin` lacks, a submodule PR was merged locally but not yet published
+    (`git publish`'s job), so the submodule is refused. An unreachable Gitea is
+    refused too -- an unpublished merge cannot be ruled out.
+  * Staging heal: if `origin` is ahead of the submodule's Gitea `main`, the two
+    are one repo the machine mirrors, and the lag would make a later
+    `publish_submodule` origin push non-fast-forward, so Gitea is fast-forwarded
+    to `origin` (a warning, not a failure, if that push cannot be made).
+  * Divergence guard: if Gitea `main` and `origin` have each diverged, the
+    submodule is refused for manual reconciliation.
 """
 
 import subprocess
@@ -30,7 +38,7 @@ if __package__ in (None, ""):
     __package__ = "submodules.devenv_utils"
 
 from .config import DevenvConfig, load_config
-from .gitea_client import gitmodule_entries
+from .gitea_client import REMOTE_NAME, gitmodule_entries
 from .publish import confirm, main_relationship, origin_default_branch, print_commits
 from .submodule_bump import (
     BumpOffer,
@@ -45,6 +53,7 @@ from .submodule_bump import (
     has_uncommitted_changes,
     is_ancestor,
     short,
+    submodule_gitea_tip,
 )
 
 REMEDY = "Please run `git publish` and then retry."
@@ -66,10 +75,11 @@ _ORIGIN_REASONS = {
 }
 
 
-def reject(message: str):
-    """Print a rejection -- the tailored reason plus the uniform remedy -- to
-    stderr."""
-    print(f"{message}.\n{REMEDY}", file=sys.stderr)
+def reject(message: str, remedy: str = REMEDY):
+    """Print a rejection -- the tailored reason plus a remedy -- to stderr. The
+    remedy defaults to the publish-and-retry sentence; a case publish cannot fix
+    (e.g. a Gitea/origin divergence) passes its own."""
+    print(f"{message}.\n{remedy}", file=sys.stderr)
 
 
 def fetched_relationship(repo_root: Path, target: str) -> str:
@@ -102,22 +112,49 @@ def precondition_failure(repo_root: Path) -> str:
     return ""
 
 
-def tip_published(sub: Path, tip: str) -> bool | None:
-    """Whether `tip` has reached the submodule's GitHub `origin` default branch.
-    None when `origin` cannot be reached."""
+def origin_tip(sub: Path) -> str | None:
+    """The submodule's `origin` default-branch tip, fetched so it is a local
+    object. None when `origin` cannot be reached."""
     if git_result(sub, "fetch", "--quiet", "origin").returncode != 0:
         return None
-    return is_ancestor(sub, tip, f"origin/{origin_default_branch(sub)}")
+    return git_out(sub, "rev-parse", f"origin/{origin_default_branch(sub)}")
+
+
+def gitea_vs_origin(sub: Path, gitea: str, origin: str) -> str:
+    """How the submodule's Gitea main relates to its origin tip: 'equal',
+    'origin_ahead' (origin contains gitea and more), 'gitea_ahead' (gitea has
+    commits origin lacks -- an unpublished merge), or 'diverged'."""
+    if gitea == origin:
+        return "equal"
+    if is_ancestor(sub, gitea, origin):
+        return "origin_ahead"
+    if is_ancestor(sub, origin, gitea):
+        return "gitea_ahead"
+    return "diverged"
+
+
+def catch_gitea_up(repo_root: Path, name: str, sub_path: str, origin: str):
+    """Fast-forward the submodule's Gitea main to its origin tip, reconciling the
+    machine's staging so a later `publish_submodule` origin push stays a
+    fast-forward. A failed push is a warning, not a failure -- origin is the
+    authority and the bump is still valid."""
+    result = git_result(repo_root / sub_path, "push", REMOTE_NAME, f"{origin}:refs/heads/main")
+    if result.returncode == 0:
+        print(f"{name}: fast-forwarded the submodule's Gitea main to origin ({short(origin)}).")
+    else:
+        print(
+            f"warning: {name}: could not fast-forward the submodule's Gitea main to origin; "
+            "continuing.",
+            file=sys.stderr,
+        )
 
 
 def bump_explanation(offer: BumpOffer) -> str:
     return (
-        f"The {offer.name} submodule's Gitea main has commits the recorded pointer\n"
-        "does not include yet, already published to the submodule's GitHub origin\n"
-        "(for a shared submodule, typically a change another consumer project\n"
-        "published). Answering Y checks the submodule out at that tip and commits\n"
-        "the pointer bump on the current branch; run `git publish` on the host to\n"
-        "ship it.\n"
+        f"The {offer.name} submodule's GitHub origin has commits the recorded\n"
+        "pointer does not include yet -- the latest published upstream. Answering Y\n"
+        "checks the submodule out at that tip and commits the pointer bump on the\n"
+        "current branch; run `git publish` on the host to ship it.\n"
         "\n"
         "Proceeding with Y runs the commands:\n"
         "\n"
@@ -125,26 +162,48 @@ def bump_explanation(offer: BumpOffer) -> str:
     )
 
 
+def reconcile_gitea(repo_root: Path, name: str, sub_path: str, gitea: str, origin: str) -> str:
+    """Act on the Gitea-vs-origin relationship before a bump is considered.
+    Returns 'ok' to proceed, or 'rejected' after refusing the submodule."""
+    relation = gitea_vs_origin(repo_root / sub_path, gitea, origin)
+    if relation == "gitea_ahead":
+        reject(f"{name}: Gitea has merged submodule changes that are not pushed to origin yet")
+        return "rejected"
+    if relation == "diverged":
+        reject(
+            f"{name}: the submodule's Gitea main and origin have diverged",
+            remedy="Reconcile the submodule's Gitea main and origin manually, then retry.",
+        )
+        return "rejected"
+    if relation == "origin_ahead":
+        catch_gitea_up(repo_root, name, sub_path, origin)
+    return "ok"
+
+
 def update_one(repo_root: Path, name: str, sub_path: str) -> str:
     """Handle one submodule. Returns 'bumped', 'current', 'skipped' (a warning
     was printed), or 'rejected' (the run must end non-zero)."""
-    offer = evaluate_bump(repo_root, name, sub_path)
-    if offer is None:
-        reject(f"{name}: the submodule's Gitea repo could not be reached")
+    sub = repo_root / sub_path
+    origin = origin_tip(sub)
+    if origin is None:
+        reject(f"{name}: the submodule's origin could not be reached to find the latest commit")
         return "rejected"
+    gitea = submodule_gitea_tip(repo_root, sub_path)
+    if gitea is None:
+        reject(
+            f"{name}: the submodule's Gitea repo could not be reached, so an unpublished merge "
+            "cannot be ruled out"
+        )
+        return "rejected"
+    if reconcile_gitea(repo_root, name, sub_path, gitea, origin) == "rejected":
+        return "rejected"
+    offer = evaluate_bump(repo_root, name, sub_path, origin)
     if offer.status == "none":
         print(f"{name}: up to date")
         return "current"
     if offer.status in ("diverged", "unsafe"):
         print(f"warning: {offer.warning}", file=sys.stderr)
         return "skipped"
-    published = tip_published(repo_root / sub_path, offer.tip)
-    if published is None:
-        reject(f"{name}: the submodule's origin could not be reached to verify the update")
-        return "rejected"
-    if not published:
-        reject(f"{name}: Gitea has merged submodule changes that are not pushed to origin yet")
-        return "rejected"
     print_commits(bump_header(offer), list(offer.spanned))
     if not confirm(bump_question(offer), bump_explanation(offer)):
         return "skipped"
