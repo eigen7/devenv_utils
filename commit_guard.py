@@ -19,9 +19,10 @@ ends:
 
   post-commit / post-merge (`sync`): immediately mirror the new `main` tip
       to the `gitea` remote, so Gitea is never behind for longer than a
-      commit takes. A failed mirror push (service down, or a rewritten
-      `main` history making the push non-fast-forward) cannot un-commit;
-      it prints what happened and the way to reconcile.
+      commit takes. Rewriting `main` -- `git commit --amend` on a tip that
+      was already mirrored, most of all -- mirrors too, by replacing the
+      superseded Gitea tip. A push that fails for any other reason cannot
+      un-commit; it prints what happened and the way to reconcile.
 
 Both actions no-op anywhere that isn't the `main` branch of a checkout with
 a `gitea` remote -- feature worktrees, detached HEADs, and submodule
@@ -44,7 +45,7 @@ import subprocess
 
 from .config import DevenvConfig, load_config
 from .gitea_client import REMOTE_NAME
-from .publish import main_relationship
+from .publish import gitea_tip_superseded, main_relationship
 
 UNPUBLISHED_MERGES_MESSAGE = (
     "Gitea's main has merged commits your local main lacks, so this commit would\n"
@@ -55,11 +56,8 @@ UNPUBLISHED_MERGES_MESSAGE = (
 
 SYNC_FAILED_MESSAGE = (
     "WARNING: could not mirror main to Gitea (`git push gitea main` failed).\n"
-    "Local main and Gitea's main can now diverge. Once Gitea is reachable, run\n"
-    "`git push gitea main`. If that push is rejected as non-fast-forward, either\n"
-    "Gitea has merges you don't (run `git publish` and follow its advice), or\n"
-    "main's history was rewritten (restore it from `git reflog`, or push the\n"
-    "rewrite deliberately with `git push --force gitea main`)."
+    "Local main and Gitea's main can now diverge. Run `git publish` on the host:\n"
+    "it reports what each side holds and offers the reconciliation that fits."
 )
 
 
@@ -116,31 +114,76 @@ def check(repo_root: Path):
         sys.exit(UNPUBLISHED_MERGES_MESSAGE)
 
 
+def remote_tracking_sha(repo_root: Path, ref: str) -> str | None:
+    """The commit a remote-tracking ref names, or None when the checkout has no
+    such ref. Read locally: no network, so the answer is as fresh as the last
+    fetch."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", ref],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+    return result.stdout.strip() or None
+
+
+def push_main(repo_root: Path, replacing: str | None = None):
+    """Push the local main to the Gitea remote, replacing the named tip when one
+    is given.
+
+    --recurse-submodules=no: this is a same-machine mirror of `main` to the
+    local Gitea service, and every submodule commit `main` references came from
+    a Gitea merge, so it is already on Gitea. push.recurseSubmodules=check
+    exists to protect the GitHub publishing invariant (never push a superproject
+    commit whose submodule commit GitHub lacks); it would otherwise abort this
+    mirror whenever a just-recorded submodule commit sits in the submodule clone
+    only as a fetched object, in no remote-tracking ref."""
+    lease = [f"--force-with-lease=main:{replacing}"] if replacing else []
+    return subprocess.run(
+        ["git", "push", "--quiet", "--recurse-submodules=no", *lease, REMOTE_NAME, "main"],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+
+
+def superseded_gitea_tip(repo_root: Path) -> str | None:
+    """Gitea's main tip, when replacing it with the local main would discard
+    nothing but a copy of rewritten local history (see
+    publish.gitea_tip_superseded). None when Gitea is unreachable or its tip
+    holds anything worth keeping."""
+    sha = gitea_main_sha(repo_root)
+    if sha is None:
+        return None
+    origin_tip = remote_tracking_sha(repo_root, "origin/main")
+    return sha if gitea_tip_superseded(repo_root, sha, origin_tip) else None
+
+
 def sync(repo_root: Path):
-    """The post-commit/post-merge action: mirror the new main tip to Gitea.
+    """The post-commit/post-merge action: mirror the new main tip to Gitea,
+    replacing a tip this checkout has rewritten.
 
     Never fails the hook -- the commit already exists; a failed push only
     reports how to reconcile.
     """
     if not guards_main(repo_root):
         return
-    # --recurse-submodules=no: this is a same-machine mirror of `main` to the
-    # local Gitea service, and every submodule commit `main` references came
-    # from a Gitea merge, so it is already on Gitea. push.recurseSubmodules=check
-    # exists to protect the GitHub publishing invariant (never push a
-    # superproject commit whose submodule commit GitHub lacks); it would
-    # otherwise abort this mirror whenever a just-recorded submodule commit sits
-    # in the submodule clone only as a fetched object, in no remote-tracking ref.
-    result = subprocess.run(
-        ["git", "push", "--quiet", "--recurse-submodules=no", REMOTE_NAME, "main"],
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
-    )
+    result = push_main(repo_root)
     if result.returncode == 0:
         print("mirrored main -> gitea")
-    else:
+        return
+    superseded = superseded_gitea_tip(repo_root)
+    if superseded is None:
         print(f"{result.stderr.strip()}\n{SYNC_FAILED_MESSAGE}", file=sys.stderr)
+        return
+    # The lease makes this safe against the seconds between reading the tip and
+    # replacing it: a PR merged into Gitea in that window fails the push rather
+    # than being discarded.
+    forced = push_main(repo_root, replacing=superseded)
+    if forced.returncode == 0:
+        print(f"mirrored rewritten main -> gitea (replaced {superseded[:9]})")
+    else:
+        print(f"{forced.stderr.strip()}\n{SYNC_FAILED_MESSAGE}", file=sys.stderr)
 
 
 ACTIONS = {
