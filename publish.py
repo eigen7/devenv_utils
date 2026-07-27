@@ -92,6 +92,26 @@ REBASE_EXPLANATION = (
     "    git rebase {tip}"
 )
 
+REPLACE_GITEA_EXPLANATION = (
+    "Gitea's main tip is a commit this checkout made and has since rewritten --\n"
+    "the state a `git commit --amend` on main leaves behind. GitHub does not have\n"
+    "it, and nothing else can: Gitea's main only ever advances by a PR merge or\n"
+    "by this checkout's mirror. Replacing it discards the superseded copy.\n"
+    "\n"
+    "Rebasing instead would replay your commit onto its own older self, so every\n"
+    "hunk it touches conflicts.\n"
+    "\n"
+    "Proceeding with Y runs the command:\n"
+    "\n"
+    "    git push --force-with-lease=main:{tip} gitea main"
+)
+
+PUBLISHED_REWRITE_NOTICE = (
+    "Note: Gitea's tip is a commit you rewrote locally, but GitHub already has\n"
+    "it, so it cannot be discarded. Reconciling replays your version on top of\n"
+    "it, which conflicts wherever the two touch the same lines."
+)
+
 MERGE_GITHUB_EXPLANATION = (
     "GitHub has commits that never went through Gitea -- most likely someone\n"
     "pushed to GitHub directly.\n"
@@ -154,30 +174,79 @@ def rebase_or_abort(repo: Path, tip: str):
         ) from None
 
 
-def reconcile_diverged_gitea(repo_root: Path, gitea_tip: str, origin_tip: str):
-    """Reconcile a local `main` that has diverged from Gitea's.
+def main_reflog_shas(repo_root: Path) -> set:
+    """Every commit `main` has ever pointed at in this checkout."""
+    return set(git_out(repo_root, "reflog", "main", "--format=%H").split())
+
+
+def gitea_tip_rewritten(repo_root: Path, gitea_tip: str) -> bool:
+    """Whether Gitea's main tip is a commit this checkout made and has since
+    rewritten -- what a `git commit --amend` on `main` leaves behind once the
+    pre-amend commit has been mirrored. The tip was a local `main` tip once, so
+    everything reachable from it was in this checkout and Gitea holds no work of
+    its own there."""
+    return commit_present(repo_root, gitea_tip) and gitea_tip in main_reflog_shas(repo_root)
+
+
+def gitea_tip_superseded(repo_root: Path, gitea_tip: str, origin_tip: str | None) -> bool:
+    """Whether replacing Gitea's main tip with the local `main` would discard
+    nothing: this checkout rewrote the tip, and GitHub does not have it, so no
+    published history is rewritten.
+
+    An `origin_tip` of None means GitHub holds nothing this checkout knows of,
+    which satisfies the second condition -- at worst GitHub turns out to have
+    the commit after all, and the next `git publish` offers to merge it back."""
+    if origin_tip is not None and is_ancestor(repo_root, gitea_tip, origin_tip):
+        return False
+    return gitea_tip_rewritten(repo_root, gitea_tip)
+
+
+def replace_gitea_main(repo_root: Path, gitea_tip: str, superseded: list) -> bool:
+    """Confirm discarding Gitea's superseded main tip. The local `main` already
+    holds the rewritten history, so there is nothing to do here beyond agreeing
+    that the force-push at the end of sync_main may happen."""
+    print_commits("Gitea's main holds commits your main has rewritten:", superseded)
+    if not confirm(
+        "Replace Gitea's main with yours?", REPLACE_GITEA_EXPLANATION.format(tip=gitea_tip[:12])
+    ):
+        raise SystemExit(DECLINED_NOTICE)
+    return True
+
+
+def reconcile_diverged_gitea(repo_root: Path, gitea_tip: str, origin_tip: str) -> bool:
+    """Reconcile a local `main` that has diverged from Gitea's. Returns whether
+    Gitea's main must be force-updated to match the result.
 
     The recipe follows one rule: never rewrite a commit another repository
-    already has. When some local-only commit is already on GitHub origin, a
-    rebase would mint new hashes for published history and the final
-    fast-forward push to origin would be rejected -- so merge. When every
-    local-only commit is still private, rebasing onto Gitea's main rewrites
-    nothing anyone else holds and keeps `main` linear."""
+    already has. Gitea's own tip is exempt when this checkout is the repository
+    that wrote it and has since rewritten it -- then the tip is a stale copy of
+    local history and is simply replaced. Otherwise, when some local-only commit
+    is already on GitHub origin, a rebase would mint new hashes for published
+    history and the final fast-forward push to origin would be rejected -- so
+    merge. When every local-only commit is still private, rebasing onto Gitea's
+    main rewrites nothing anyone else holds and keeps `main` linear."""
     local_only = commits_beyond(repo_root, "main", gitea_tip)
+    gitea_only = commits_beyond(repo_root, gitea_tip, "main")
+    if gitea_tip_superseded(repo_root, gitea_tip, origin_tip):
+        return replace_gitea_main(repo_root, gitea_tip, gitea_only)
+    print_commits("Gitea's main has commits your main lacks:", gitea_only)
+    print_commits("Your main has commits Gitea lacks:", local_only)
+    if gitea_tip_rewritten(repo_root, gitea_tip):
+        print(PUBLISHED_REWRITE_NOTICE)
     private = set(commits_beyond(repo_root, "main", gitea_tip, origin_tip))
     published = [line for line in local_only if line not in private]
     if published:
-        print_commits("The following commits are on GitHub but are missing from Gitea:", published)
+        print_commits("Of yours, these are already on GitHub:", published)
         explanation = MERGE_GITEA_EXPLANATION.format(tip=gitea_tip[:12])
         if not confirm("Merge Gitea's main into yours?", explanation):
             raise SystemExit(DECLINED_NOTICE)
         merge_or_abort(repo_root, gitea_tip, "gitea main")
     else:
-        print_commits("Gitea is missing the following local-only commits:", local_only)
         explanation = REBASE_EXPLANATION.format(tip=gitea_tip[:12])
-        if not confirm("Rebase them onto Gitea's main?", explanation):
+        if not confirm("Rebase yours onto Gitea's main?", explanation):
             raise SystemExit(DECLINED_NOTICE)
         rebase_or_abort(repo_root, gitea_tip)
+    return False
 
 
 def merge_github_only_commits(repo_root: Path, origin_tip: str):
@@ -221,7 +290,9 @@ def sync_main(repo_root: Path):
     private commits are linearized first. Afterwards Gitea is brought up to
     the reconciled `main` -- which also covers a `main` that was simply ahead
     (a direct commit whose commit_guard mirror push didn't land) -- so the
-    GitHub pushes that follow are guaranteed fast-forwards."""
+    GitHub pushes that follow are guaranteed fast-forwards. That last push is
+    forced only to discard a superseded Gitea tip, under a lease that fails if
+    Gitea has moved since it was read."""
     if git_out(repo_root, "branch", "--show-current") != "main":
         raise SystemExit("git publish must run on `main`; check it out first.")
     git(repo_root, "fetch", gitea_read_url(repo_root), "main")
@@ -229,13 +300,15 @@ def sync_main(repo_root: Path):
     git(repo_root, "fetch", "origin", "main")
     origin_tip = git_out(repo_root, "rev-parse", "FETCH_HEAD")
     relation = main_relationship(repo_root, gitea_tip)
+    force_gitea = False
     if relation == "behind":
         git(repo_root, "merge", "--ff-only", gitea_tip)
     elif relation == "diverged":
-        reconcile_diverged_gitea(repo_root, gitea_tip, origin_tip)
+        force_gitea = reconcile_diverged_gitea(repo_root, gitea_tip, origin_tip)
     merge_github_only_commits(repo_root, origin_tip)
     if git_out(repo_root, "rev-parse", "main") != gitea_tip:
         print("Syncing Gitea's main to the local main...")
+        lease = [f"--force-with-lease=main:{gitea_tip}"] if force_gitea else []
         # --recurse-submodules=no: this mirrors `main` to the same-machine Gitea
         # service, whose submodule commits all came from Gitea merges. The
         # submodule origin pushes happen later in publish (publish_submodule), so
@@ -243,7 +316,7 @@ def sync_main(repo_root: Path):
         # remote-tracking ref here; push.recurseSubmodules=check -- which guards
         # the GitHub publishing invariant, not this local mirror -- would
         # otherwise abort it.
-        git(repo_root, "push", "--recurse-submodules=no", REMOTE_NAME, "main")
+        git(repo_root, "push", "--recurse-submodules=no", *lease, REMOTE_NAME, "main")
 
 
 def sync_submodule(repo_root: Path, sub_path: str):
