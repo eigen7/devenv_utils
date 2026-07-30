@@ -27,6 +27,7 @@ from .gitea_service import wizard_setup as gitea_wizard_setup
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
 from .vscode_attach import (
+    attach_config_is_current,
     vscode_attach_config_paths,
     write_vscode_attach_config,
 )
@@ -228,6 +229,12 @@ class SetupWizardTool:
     # ---- Step: VS Code attach config -----------------------------------
 
     def setup_vscode_attach_config(self):
+        """Point VS Code's "Attach to Running Container" at the right remote user.
+
+        Only the configs that would actually change are proposed: the wizard is
+        re-run for all sorts of reasons, and a step that explains itself and asks
+        for confirmation every time trains the reader to stop reading it.
+        """
         c = self.config
         paths = vscode_attach_config_paths(c.instance_name)
         if not paths:
@@ -238,20 +245,31 @@ class SetupWizardTool:
             print(f'File\' and set "remoteUser": "{c.remote_user}".')
             return
 
+        stale = [
+            p
+            for p in paths
+            if not attach_config_is_current(
+                p, c.instance_name, c.remote_user, c.container_repo_path
+            )
+        ]
+        if not stale:
+            print_green(f"VS Code attach config already set up for {c.instance_name}.")
+            return
+
         print("VS Code's 'Attach to Running Container' command does NOT read")
         print("this repo's .devcontainer/devcontainer.json. It reads a per-container")
         print("config under the VS Code user-data dir. Without it, vscode-server")
         print("runs as root inside the container.")
         print()
-        print("Detected user-data dir(s); proposing to write/merge:")
-        for p in paths:
+        print("Proposing to write/merge:")
+        for p in stale:
             print(f"  {p}")
         print()
         if not yes_no(f"Configure VS Code attach to run as {c.remote_user}?"):
             print("Skipping VS Code attach config.")
             return
 
-        for p in paths:
+        for p in stale:
             try:
                 status = write_vscode_attach_config(
                     p, c.instance_name, c.remote_user, c.container_repo_path
@@ -261,10 +279,8 @@ class SetupWizardTool:
                 continue
             if status == "created":
                 print_green(f"Wrote {p}")
-            elif status == "updated":
-                print_green(f"Updated {p} (merged in remoteUser/workspaceFolder/containerName)")
             else:
-                print(f"{p} already up to date.")
+                print_green(f"Updated {p} (merged in remoteUser/workspaceFolder/containerName)")
 
     # ---- Step: Claude trust --------------------------------------------
 

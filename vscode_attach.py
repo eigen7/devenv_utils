@@ -71,6 +71,21 @@ def desired_vscode_attach_config(
     }
 
 
+def attach_config_is_current(
+    path: Path, instance_name: str, remote_user: str, workspace_folder: str
+) -> bool:
+    """Whether `path` already carries the desired keys, so writing it would
+    change nothing. Keys the user added by hand are ignored, matching the merge
+    semantics of write_vscode_attach_config; a missing or unreadable file is not
+    current, and writing it is where that is diagnosed."""
+    try:
+        existing = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return False
+    desired = desired_vscode_attach_config(instance_name, remote_user, workspace_folder)
+    return isinstance(existing, dict) and existing | desired == existing
+
+
 def write_vscode_attach_config(
     path: Path, instance_name: str, remote_user: str, workspace_folder: str
 ) -> str:
@@ -98,8 +113,7 @@ def write_vscode_attach_config(
                 f"Refusing to overwrite {path}: it exists but is not valid JSON "
                 f"({e}). Fix or delete it and re-run."
             )
-        merged = dict(existing)
-        merged.update(desired)
+        merged = existing | desired
         if merged == existing:
             return "unchanged"
         path.write_text(json.dumps(merged, indent=4) + "\n")
