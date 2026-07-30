@@ -430,7 +430,9 @@ def main(cfg: DevenvConfig):
             "Inside a dev container the gateway is already wired up (run_docker.py)."
         )
     parser = argparse.ArgumentParser(
-        description="Provision the machine-wide gateway (reverse-proxy) service."
+        description="Manage the machine-wide gateway that serves every project's "
+        "*.localhost dev URLs (see GATEWAY.md). Its published HTTP port appears in all "
+        "of those URLs, so it is chosen once, at first provisioning."
     )
     parser.add_argument(
         "command",
@@ -438,7 +440,8 @@ def main(cfg: DevenvConfig):
         default="setup",
         choices=["setup", "reconfigure"],
         help="setup (default): provision the gateway if this host has none. "
-        "reconfigure: change the machine-wide published HTTP port.",
+        "reconfigure: change the published HTTP port -- reporting what the change "
+        "invalidates (bookmarked dev URLs, running dev containers) before applying it.",
     )
     args = parser.parse_args()
     try:

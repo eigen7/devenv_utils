@@ -577,7 +577,10 @@ def main(cfg: DevenvConfig):
             "Inside a dev container the service is already wired up (gitea_client.py)."
         )
     parser = argparse.ArgumentParser(
-        description="Provision the machine-wide Gitea service and register this repo on it."
+        description="Manage the machine-wide Gitea service backing PR review (see GITEA.md). "
+        "Its web port and state dir are shared by every project on this host, so they are "
+        "chosen once, at first provisioning; registering a project on the service is "
+        "separate, and safe to repeat."
     )
     parser.add_argument(
         "command",
@@ -585,8 +588,10 @@ def main(cfg: DevenvConfig):
         default="setup",
         choices=["setup", "reconfigure"],
         help="setup (default): provision the service if this host has none, then "
-        "register this repo. reconfigure: change the machine-wide web port or "
-        "state dir, and re-register every project affected.",
+        "register this repo on it. reconfigure: change the machine-wide web port or "
+        "state dir -- reporting what the change invalidates (other projects' remotes, "
+        "open PRs, unpublished merges, running dev containers) before applying it, and "
+        "re-registering every recorded project afterwards.",
     )
     args = parser.parse_args()
     try:

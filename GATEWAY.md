@@ -168,23 +168,18 @@ such servers simply stay out of the table.
 | Piece | Side | Role |
 | --- | --- | --- |
 | [docker/gateway/](docker/gateway/) | image | Traefik (pinned version) plus its static configuration: the `web` entrypoint on :80, the docker provider (label-derived routes only, `devenv` network), and the dashboard router. |
-| [gateway_service.py](gateway_service.py) | host | Owns `~/.devenv/gateway.json` (the published port), builds the image, (re)creates/starts the container, and derives each dev container's labels, published ports, and `DEVENV_SERVICE_URL_*` env from its `[services]` table. Run directly from a consumer repo (`gateway_service.py [setup\|reconfigure]`), or through the wizard step `SetupWizardTool.setup_gateway_service()`. |
+| [gateway_service.py](gateway_service.py) | host | Owns `~/.devenv/gateway.json` (the published port), builds the image, (re)creates/starts the container, and derives each dev container's labels, published ports, and `DEVENV_SERVICE_URL_*` env from its `[services]` table. Run directly from a consumer repo, or through the wizard step `SetupWizardTool.setup_gateway_service()`. |
 | [cli.py](cli.py) / [docker_ops.py](docker_ops.py) | host | `run_docker.py` path: starts the gateway if stopped, attaches the labels/env/publishes to the dev container, prints the URL table. Refuses to launch a project with services if the gateway was never provisioned (the wizard owns interactive setup). |
 | [config.py](config.py) | both | Parses `[services]` (int or `{port, publish}` per name) and validates names. |
 
 ## Lifecycle
 
 **First-time setup** (wizard, host): `setup_gateway_service()` prompts for
-the HTTP port (default 80), builds the image, creates the container, and
-waits for it to answer. The port is recorded only once that succeeded, so a
-port nothing can serve on is re-asked rather than remembered.
+the HTTP port (default 80) and provisions the container.
 
-**Re-running setup** (any project's wizard): the recorded port is reported
-and kept — it is the port in *every* project's dev URLs, so the wizard is not
-the place to change it. The image is rebuilt, and the container is replaced
-only if the port or the image content it was created from has changed
-(recorded in its `devenv.provisioning` label); otherwise it is left running,
-so another project's setup run doesn't drop the routes of containers in use.
+**Re-running setup** (any project's wizard): adopts the gateway the host
+already has and leaves its port as it is — that port is in *every* project's
+dev URLs, not this project's to re-answer.
 
 **Every dev-container launch** (`run_docker.py`, host): `docker start
 devenv-gateway` if it exists but is stopped (after a reboot the restart
@@ -196,14 +191,6 @@ action.
 **Steady state**: nothing manages the gateway at all; routes track dev
 containers by themselves.
 
-**Changing the published port**: `gateway_service.py reconfigure`. It reports
-what the change costs (every bookmarked dev URL, and the URL env of any
-running dev container, which keeps the old port until it is relaunched), asks,
-and rolls back to the recorded port if the new one fails to come up — the old
-container must be removed before one on a different port can replace it, so
-without the rollback an unusable port would leave every project's dev URLs
-dead.
-
 **Manual control**: `docker stop|start|logs devenv-gateway`. To reset
 entirely: `docker rm -f devenv-gateway` and re-run the wizard — there is no
 state to lose.
@@ -214,8 +201,7 @@ state to lose.
   `*.localhost` URL gets connection-refused. `docker start devenv-gateway`
   on the host. Dev containers never attempt to launch or repair it.
 - **Port 80 already bound at creation**: something else serves HTTP on the
-  host. Pick another port (`gateway_service.py reconfigure`); URLs then carry
-  an explicit `:<port>` suffix.
+  host. Pick another port; URLs then carry an explicit `:<port>` suffix.
 - **URL resolves but 404s**: the gateway is up but has no such route — the
   project's dev container is not running, or the service name is not in its
   `[services]` table. Check `http://devenv-gateway.localhost` for the live
