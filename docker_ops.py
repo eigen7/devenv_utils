@@ -188,11 +188,20 @@ def _convenience_mounts() -> list:
     # itself runs.
     vscode_server = Path.home() / ".devenv_vscode_server"
     vscode_server.mkdir(parents=True, exist_ok=True)
+    # devuser-setup.sh generates the container's ssh identity (keypair, config,
+    # known_hosts) in ~/.ssh; persisting that dir keeps the identity stable
+    # across --rm relaunches, so an external machine that authorized the key
+    # once stays reachable. A dedicated dir rather than the host's real ~/.ssh,
+    # so the host's own keys are never exposed inside containers.
+    ssh_dir = Path.home() / ".devenv_ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True)
+    ssh_dir.chmod(0o700)  # ssh refuses group/world-accessible key material
     return [
         "-v", f"{claude_dir}:/workspace/.home-dir-soft-links/.claude",
         "-v", f"{claude_json}:/workspace/.home-dir-soft-links/.claude.json",
         "-v", f"{gitconfig}:/workspace/.home-dir-soft-links/.gitconfig",
         "-v", f"{vscode_server}:/workspace/.home-dir-soft-links/.vscode_server",
+        "-v", f"{ssh_dir}:/workspace/.home-dir-soft-links/.ssh",
     ]
 
 
