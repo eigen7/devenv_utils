@@ -6,8 +6,17 @@
 # /workspace/repo), which the container launcher passes through at run time.
 set -e
 
-# SSH: a container-local keypair (self-authorized, lax known-hosts) so that
-# tools that ssh to localhost/other containers Just Work.
+# SSH: point ~/.ssh at its host-persisted bind mount (see _convenience_mounts
+# in docker_ops.py) before anything writes there, so the identity below
+# survives --rm relaunches -- a machine that authorized the key once stays
+# reachable from every future container.
+if [ -e /workspace/.home-dir-soft-links/.ssh ]; then
+  ln -snf /workspace/.home-dir-soft-links/.ssh ~/.ssh
+fi
+
+# SSH: a keypair (self-authorized, lax known-hosts) so that tools that ssh to
+# localhost/other containers Just Work. Generated only when absent, which with
+# the persistent ~/.ssh above means once ever.
 if command -v ssh-keygen >/dev/null && ! [ -f ~/.ssh/id_ed25519 ]; then
   mkdir -p ~/.ssh
   chmod 700 ~/.ssh
