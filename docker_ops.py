@@ -193,6 +193,12 @@ def _convenience_mounts() -> list:
     # across --rm relaunches, so an external machine that authorized the key
     # once stays reachable. A dedicated dir rather than the host's real ~/.ssh,
     # so the host's own keys are never exposed inside containers.
+    #
+    # One dir per host user, so every devenv_utils consumer on the machine
+    # shares it -- deliberately: a machine authorizes the key once and every
+    # project's container can reach it, and host aliases and known_hosts
+    # accumulate in one place. The flip side is one identity and one alias
+    # namespace across projects, so an alias means the same host everywhere.
     ssh_dir = Path.home() / ".devenv_ssh"
     ssh_dir.mkdir(parents=True, exist_ok=True)
     ssh_dir.chmod(0o700)  # ssh refuses group/world-accessible key material
