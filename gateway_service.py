@@ -15,6 +15,12 @@ running this module directly from a consumer repo on the host:
 
   submodules/devenv_utils/gateway_service.py
 
+The published port is machine-wide -- it is the port in every project's dev
+URLs -- so it is chosen once, at first provisioning, and changed only through
+a deliberate separate step:
+
+  submodules/devenv_utils/gateway_service.py reconfigure
+
 The dev-container launcher calls dev_container_args() to attach a container's
 routes and env, and launch_urls() to print the service -> URL table.
 """
@@ -29,6 +35,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "submodules.devenv_utils"
 
+import argparse
 import json
 import subprocess
 import time
@@ -36,8 +43,16 @@ import urllib.error
 import urllib.request
 
 from .config import DevenvConfig, Service, load_config
-from .console import SetupException, print_green
-from .docker_ops import build_image, is_container_running
+from .console import SetupException, print_green, print_red, yes_no
+from .docker_ops import (
+    PROVISIONING_LABEL,
+    build_image,
+    container_exists,
+    container_label,
+    image_id,
+    is_container_running,
+    running_containers_with_env,
+)
 from .gitea_client import DEVENV_NETWORK
 from .gitea_service import ensure_network
 from .state import in_docker_container
@@ -52,11 +67,34 @@ CONFIG_PATH = Path.home() / ".devenv" / "gateway.json"
 DEFAULT_HTTP_PORT = 80
 ENTRYPOINT_PORT = 80
 
+# Prefix of the per-service URL env vars a dev container is launched with; the
+# marker identifying containers wired to the gateway (see service_env_var).
+SERVICE_URL_ENV_PREFIX = "DEVENV_SERVICE_URL_"
+
 STARTUP_TIMEOUT_S = 30
 
 NOT_PROVISIONED_MESSAGE = (
     "The gateway service has not been set up on this host. Run ./setup_wizard.py "
     "(or submodules/devenv_utils/gateway_service.py) first."
+)
+
+EXISTING_SERVICE_NOTICE = (
+    "The port is machine-wide, so the wizard leaves it alone. To change it:\n"
+    "    submodules/devenv_utils/gateway_service.py reconfigure"
+)
+
+PORT_CHANGE_NOTICE = (
+    "This port appears in every project's dev URLs, so every bookmark to a\n"
+    "*.localhost dev URL changes with it (port 80 is the one that leaves them\n"
+    "suffix-free). The gateway holds no other state: routes are rediscovered from\n"
+    "the labels of whatever containers are running."
+)
+
+STALE_CONTAINERS_NOTICE = (
+    "These running dev containers were launched against the current port and hold\n"
+    "their service URLs in their environment. Their routes keep working, but the\n"
+    "URLs they print and pass to their apps stay on the old port until they are\n"
+    "exited and relaunched:"
 )
 
 
@@ -85,7 +123,7 @@ def service_hostname(project: str, service: str) -> str:
 
 def service_env_var(service: str) -> str:
     """The env var carrying a service's browser URL into the dev container."""
-    return "DEVENV_SERVICE_URL_" + service.upper().replace("-", "_")
+    return SERVICE_URL_ENV_PREFIX + service.upper().replace("-", "_")
 
 
 def service_url(project: str, service: str, http_port: int) -> str:
@@ -190,12 +228,16 @@ def launch_urls(config: DevenvConfig, host_network: bool) -> dict[str, str]:
 # ---- Docker plumbing -----------------------------------------------------
 
 
-def docker(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker", *args], capture_output=True, text=True)
+def provisioning_signature(service: dict) -> str:
+    """What a gateway container was created from: the port the user chooses, plus
+    the image content. Recorded as a container label so a repeat setup run can
+    tell an already-current container from one that must be replaced."""
+    return json.dumps({"http_port": service["http_port"], "image": image_id(IMAGE)}, sort_keys=True)
 
 
-def container_exists(name: str) -> bool:
-    return docker("container", "inspect", name).returncode == 0
+def container_up_to_date(service: dict) -> bool:
+    label = container_label(SERVICE_CONTAINER, PROVISIONING_LABEL)
+    return container_exists(SERVICE_CONTAINER) and label == provisioning_signature(service)
 
 
 def create_container(service: dict):
@@ -218,6 +260,7 @@ def create_container(service: dict):
         "--label", "traefik.http.routers.devenv-gateway.rule=Host(`devenv-gateway.localhost`)",
         "--label", "traefik.http.routers.devenv-gateway.entrypoints=web",
         "--label", "traefik.http.routers.devenv-gateway.service=api@internal",
+        "--label", f"{PROVISIONING_LABEL}={provisioning_signature(service)}",
         IMAGE,
     ]  # fmt: skip
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -238,6 +281,34 @@ def recreate_container(service: dict):
     if container_exists(SERVICE_CONTAINER):
         subprocess.run(["docker", "rm", "-f", SERVICE_CONTAINER], check=True, capture_output=True)
     create_container(service)
+
+
+def ensure_provisioned(service: dict):
+    """Build the image and leave a healthy gateway container running `service`.
+
+    A container already created from this port and image is kept (just started,
+    if someone had stopped it), so a repeat setup run doesn't drop the routes of
+    the other projects sharing the gateway. Otherwise it is replaced -- and if
+    the replacement fails to come up, the last recorded port is restored: the old
+    container must be removed before one on a different port can take its place,
+    so an unusable port would otherwise leave every project's dev URLs dead.
+    """
+    build_image(IMAGE, DOCKER_CONTEXT, assets_dir=DOCKER_CONTEXT)
+    ensure_network()
+    if container_up_to_date(service):
+        ensure_started()
+        wait_healthy(service)
+        return
+    previous = load_service_config()
+    try:
+        recreate_container(service)
+        wait_healthy(service)
+    except (SetupException, subprocess.CalledProcessError):
+        if previous is not None and previous != service:
+            print_red(f"Restoring the previous gateway port ({previous['http_port']}).")
+            recreate_container(previous)
+            wait_healthy(previous)
+        raise
 
 
 def ensure_started():
@@ -280,26 +351,76 @@ def wait_healthy(service: dict):
 
 
 def prompt_http_port() -> int:
+    """Ask for the published port, defaulting to the recorded one."""
     existing = load_service_config() or {}
     default_port = existing.get("http_port", DEFAULT_HTTP_PORT)
-    print("The gateway is a single machine-wide reverse proxy; every *.localhost")
-    print("dev URL, for every project, is served through this one host HTTP port.")
     ans = input(f"Gateway HTTP port (published on 127.0.0.1) [{default_port}]: ").strip()
     return int(ans) if ans else default_port
 
 
-def wizard_setup(cfg: DevenvConfig):
-    """The full interactive step: choose/confirm the published port, build the
-    image, (re)create the container, and wait for it to answer. The gateway holds
-    no per-project state, so `cfg` only names the calling project for messages."""
-    service = {"http_port": prompt_http_port()}
-    save_service_config(service)
-    build_image(IMAGE, DOCKER_CONTEXT, assets_dir=DOCKER_CONTEXT)
-    ensure_network()
-    recreate_container(service)
-    wait_healthy(service)
+def dashboard_url(service: dict) -> str:
     suffix = "" if service["http_port"] == DEFAULT_HTTP_PORT else f":{service['http_port']}"
-    print_green(f"Gateway service ready. Dashboard: http://devenv-gateway.localhost{suffix}")
+    return f"http://devenv-gateway.localhost{suffix}"
+
+
+def wizard_setup(cfg: DevenvConfig):
+    """The wizard step: provision the gateway if this host has none, else adopt
+    the one it has.
+
+    Only a host without a recorded gateway is asked for the port; on every later
+    run it is reported and left alone, because it is the port in every project's
+    dev URLs (reconfigure() is the way to change it). `cfg` is unused -- the
+    gateway keeps no per-project state -- and only keeps the wizard steps'
+    signatures uniform.
+    """
+    service = load_service_config()
+    if service is None:
+        print("The gateway is a single machine-wide reverse proxy; every *.localhost")
+        print("dev URL, for every project, is served through this one host HTTP port.")
+        service = {"http_port": prompt_http_port()}
+    else:
+        print(f"Using the gateway already provisioned on this host (port {service['http_port']}).")
+        print(EXISTING_SERVICE_NOTICE)
+    ensure_provisioned(service)
+    save_service_config(service)
+    print_green(f"Gateway service ready. Dashboard: {dashboard_url(service)}")
+
+
+# ---- Reconfiguration -----------------------------------------------------
+
+
+def confirm_change(previous: dict, service: dict) -> bool:
+    """Spell out what the change costs, then ask."""
+    print(f"\nGateway HTTP port {previous['http_port']} -> {service['http_port']}")
+    print(PORT_CHANGE_NOTICE)
+    stale = running_containers_with_env(SERVICE_URL_ENV_PREFIX)
+    if stale:
+        print(f"\n{STALE_CONTAINERS_NOTICE}")
+        for name in stale:
+            print(f"  {name}")
+    print()
+    return yes_no("Apply this change?", default_yes=False)
+
+
+def reconfigure(cfg: DevenvConfig):
+    """Change the machine-wide published port: report what the change affects,
+    then apply it."""
+    previous = load_service_config()
+    if previous is None:
+        raise SetupException(NOT_PROVISIONED_MESSAGE)
+    print("The gateway is shared by every devenv project on this machine.")
+    print(f"Current HTTP port: {previous['http_port']}")
+    service = {**previous, "http_port": prompt_http_port()}
+    if service == previous:
+        print_green("Port unchanged; nothing to do.")
+        return
+    if not confirm_change(previous, service):
+        raise SetupException("Nothing was changed.")
+    ensure_provisioned(service)
+    save_service_config(service)
+    print_green(f"Gateway reconfigured. Dashboard: {dashboard_url(service)}")
+    if running_containers_with_env(SERVICE_URL_ENV_PREFIX):
+        print("Exit and relaunch the dev containers listed above (./run_docker.py).")
 
 
 def main(cfg: DevenvConfig):
@@ -308,8 +429,26 @@ def main(cfg: DevenvConfig):
             "gateway_service.py manages the service from the HOST -- run it there. "
             "Inside a dev container the gateway is already wired up (run_docker.py)."
         )
+    parser = argparse.ArgumentParser(
+        description="Manage the machine-wide gateway that serves every project's "
+        "*.localhost dev URLs (see GATEWAY.md). Its published HTTP port appears in all "
+        "of those URLs, so it is chosen once, at first provisioning."
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="setup",
+        choices=["setup", "reconfigure"],
+        help="setup (default): provision the gateway if this host has none. "
+        "reconfigure: change the published HTTP port -- reporting what the change "
+        "invalidates (bookmarked dev URLs, running dev containers) before applying it.",
+    )
+    args = parser.parse_args()
     try:
-        wizard_setup(cfg)
+        if args.command == "reconfigure":
+            reconfigure(cfg)
+        else:
+            wizard_setup(cfg)
     except SetupException as e:
         raise SystemExit("\n".join(str(a) for a in e.args)) from e
 

@@ -7,6 +7,7 @@ lets each project keep a minimal Dockerfile that `COPY`s the shared scripts
 without those scripts having to physically live in the project tree.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -73,6 +74,60 @@ def image_exists(image: str) -> bool:
         ["docker", "image", "inspect", image],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     ).returncode == 0
+
+
+# ---- Inspection --------------------------------------------------------
+
+# Label recording the inputs a service container was created from, so the
+# managing script can tell a container that already matches the current
+# configuration from one that must be recreated (gitea_service.py,
+# gateway_service.py).
+PROVISIONING_LABEL = "devenv.provisioning"
+
+
+def docker(*args: str) -> subprocess.CompletedProcess:
+    """Run a docker command, capturing both streams for the caller to inspect."""
+    return subprocess.run(["docker", *args], capture_output=True, text=True)
+
+
+def container_exists(name: str) -> bool:
+    return docker("container", "inspect", name).returncode == 0
+
+
+def image_id(image: str) -> str:
+    """The image's content ID, or "" if it isn't built locally. Changes on every
+    rebuild that produces different content, so it identifies what a container
+    was created from."""
+    result = docker("image", "inspect", "--format={{.Id}}", image)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def container_label(name: str, label: str) -> str:
+    """The value of `label` on container `name`; "" if either is absent."""
+    template = f'--format={{{{index .Config.Labels "{label}"}}}}'
+    result = docker("container", "inspect", template, name)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def running_containers_with_env(var_name_prefix: str) -> list[str]:
+    """Names of running containers with an environment variable whose name starts
+    with `var_name_prefix`.
+
+    The `DEVENV_*` variables a dev container is launched with are baked in at
+    launch, so this identifies the containers that would keep using a service's
+    old configuration after it changes.
+    """
+    ids = docker("ps", "--quiet").stdout.split()
+    if not ids:
+        return []
+    listing = docker("container", "inspect", "--format={{.Name}} {{json .Config.Env}}", *ids)
+    names = []
+    for line in listing.stdout.splitlines():
+        name, _, env_json = line.partition(" ")
+        env = json.loads(env_json) or []
+        if any(entry.startswith(var_name_prefix) for entry in env):
+            names.append(name.lstrip("/"))
+    return names
 
 
 # ---- Build -------------------------------------------------------------

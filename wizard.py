@@ -158,15 +158,26 @@ class SetupWizardTool:
     def setup_gitea_service(self):
         """Provision (or adopt) the machine-wide Gitea service container and
         register this repo on it. See GITEA.md; call after setup_mount_dir
-        (legacy in-mount state detection) and the docker checks."""
+        (legacy in-mount state detection) and the docker checks.
+
+        Only a host with no service yet is asked for the web port and state dir:
+        both are shared by every project on the machine, so changing them is a
+        separate deliberate step (`gitea_service.py reconfigure`) rather than a
+        wizard prompt every re-run has to answer correctly.
+        """
         gitea_wizard_setup(self.config)
 
     # ---- Step: gateway service -----------------------------------------
 
     def setup_gateway_service(self):
-        """Provision the machine-wide gateway (reverse-proxy) service container
-        that routes each project's http://<project>-<service>.localhost dev URLs
-        to its container ports. See GATEWAY.md."""
+        """Provision (or adopt) the machine-wide gateway (reverse-proxy) service
+        container that routes each project's
+        http://<project>-<service>.localhost dev URLs to its container ports.
+        See GATEWAY.md.
+
+        As with the Gitea step, the published port is asked for only when this
+        host has no gateway yet; `gateway_service.py reconfigure` changes it.
+        """
         gateway_wizard_setup(self.config)
 
     # ---- Step: docker permissions --------------------------------------

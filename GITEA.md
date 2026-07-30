@@ -131,7 +131,7 @@ ever.**
 | Piece | Side | Role |
 | --- | --- | --- |
 | [docker/gitea/](docker/gitea/) | image | Dockerfile + entrypoint for the service container: provisions state on first boot (app.ini, sqlite migrate, admin + claude users), enforces the settings that must hold (bind address, root URL), generates nginx.conf, runs `gitea web` + nginx and exits if either dies (so the restart policy revives both). |
-| [gitea_service.py](gitea_service.py) | host | Owns `~/.devenv/gitea.json` (state dir + web port), builds the image, creates/starts the container, migrates legacy state, and registers a consumer repo (sets the `gitea` remote in the repo and its submodules, seeds the server-side repo via push-to-create). Run directly from a consumer repo, or through the wizard step `SetupWizardTool.setup_gitea_service()`. |
+| [gitea_service.py](gitea_service.py) | host | Owns `~/.devenv/gitea.json` (state dir, web port, registered consumers), builds the image, creates/starts the container, migrates legacy state, and registers a consumer repo (sets the `gitea` remote in the repo and its submodules, seeds the server-side repo via push-to-create). Run directly from a consumer repo, or through the wizard step `SetupWizardTool.setup_gitea_service()`. |
 | [gitea_client.py](gitea_client.py) | container | Access from inside a dev container: resolves the env-var URLs, loads credentials, wraps the backend API, and fails with host-side fix instructions when the service is unreachable. |
 | [cli.py](cli.py) / [docker_ops.py](docker_ops.py) | host | `run_docker.py` path: starts the service container if it exists but is stopped, then launches the dev container with the `devenv` network, the `DEVENV_GITEA_*` env vars, and the read-only credentials mount. Refuses to launch if the service was never set up (the wizard owns interactive provisioning). |
 | [pr_flow.py](pr_flow.py) / [gitea_merge.py](gitea_merge.py) | container | Consume `gitea_client.py`. `pr_flow.py create` also prints the stale-worktree report. |
@@ -140,27 +140,22 @@ ever.**
 ## Lifecycle
 
 **First-time setup / migration** (wizard, host): `setup_gitea_service()`
-prompts for the web port and state dir — defaulting to an existing legacy
-state dir (`<mount>/gitea`) when one is found, so existing history, PRs, and
-users carry over untouched — then builds the image, (re)creates the
-container, waits for health, and registers the consumer repo. Recreating the
-container is always safe: all state is external.
+provisions the service — asking for the web port and state dir, defaulting to
+a legacy in-mount state dir (`<mount>/gitea`) when one is found so existing
+history, PRs, and users carry over untouched — and registers the consumer
+repo on it. Whatever its host path, the state dir is always mounted at
+`/workspace/mount/gitea` inside the container, because `app.ini` records
+absolute paths under it.
 
-The state dir is mounted at `/workspace/mount/gitea` *inside the service
-container* regardless of where it lives on the host. That internal path is
-load-bearing: Gitea's `app.ini` records absolute paths (`WORK_PATH`,
-database, repos, logs) under it, so keeping the mount point fixed makes any
-state dir — including one provisioned by an in-container Gitea of old —
-work without path rewriting. The entrypoint enforces the few settings that
-must differ for service-container operation (`HTTP_ADDR = 0.0.0.0` so the
-backend is reachable across the Docker network, `ROOT_URL` matching the
-chosen web port) idempotently on every start, and relocates legacy
-credential files into `credentials/`.
+**Re-running setup** (any project's wizard): registers the calling project on
+the service the host already has, and leaves the port and state dir as they
+are — they are shared by every project on the machine, not this project's to
+re-answer.
 
 **Every dev-container launch** (`run_docker.py`, host): `docker start
-devenv-gitea` if it exists but is stopped (e.g. someone stopped it by hand —
-after a reboot the restart policy has normally already handled it), then
-launch the dev container wired up as described above.
+devenv-gitea` if it exists but is stopped (after a reboot the restart policy
+has normally already handled it), then launch the dev container wired up as
+described above.
 
 **Steady state**: nothing manages Gitea at all. It is simply always there,
 like a system service — which is what makes host-side `git fetch`, `git

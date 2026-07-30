@@ -175,9 +175,11 @@ such servers simply stay out of the table.
 ## Lifecycle
 
 **First-time setup** (wizard, host): `setup_gateway_service()` prompts for
-the HTTP port (default 80), builds the image, (re)creates the container, and
-waits for it to answer. Recreating is always safe — the gateway holds no
-state beyond its static config, which is baked into the image.
+the HTTP port (default 80) and provisions the container.
+
+**Re-running setup** (any project's wizard): adopts the gateway the host
+already has and leaves its port as it is — that port is in *every* project's
+dev URLs, not this project's to re-answer.
 
 **Every dev-container launch** (`run_docker.py`, host): `docker start
 devenv-gateway` if it exists but is stopped (after a reboot the restart
@@ -189,8 +191,7 @@ action.
 **Steady state**: nothing manages the gateway at all; routes track dev
 containers by themselves.
 
-**Manual control**: `docker stop|start|logs devenv-gateway`. To change the
-published port: re-run the wizard (or `gateway_service.py`). To reset
+**Manual control**: `docker stop|start|logs devenv-gateway`. To reset
 entirely: `docker rm -f devenv-gateway` and re-run the wizard — there is no
 state to lose.
 
@@ -200,8 +201,7 @@ state to lose.
   `*.localhost` URL gets connection-refused. `docker start devenv-gateway`
   on the host. Dev containers never attempt to launch or repair it.
 - **Port 80 already bound at creation**: something else serves HTTP on the
-  host. Re-run the wizard and pick another port; URLs then carry an explicit
-  `:<port>` suffix.
+  host. Pick another port; URLs then carry an explicit `:<port>` suffix.
 - **URL resolves but 404s**: the gateway is up but has no such route — the
   project's dev container is not running, or the service name is not in its
   `[services]` table. Check `http://devenv-gateway.localhost` for the live
