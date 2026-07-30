@@ -58,25 +58,29 @@ def setup_cdi():
     """Interactive step: generate (or refresh) the host's NVIDIA CDI spec.
 
     Idempotent. Requires sudo for `nvidia-ctk cdi generate`. Skipping is fine:
-    launch falls back to `--gpus all`, with the suspend-bug caveat.
+    launch falls back to `--gpus all`, with the suspend-bug caveat. A spec that
+    already matches the host driver is reported in one line and nothing else is
+    said: what CDI buys is only worth explaining when there is a decision to make.
     """
+    driver = host_driver_version()
+    if not driver:
+        print_red("nvidia-smi unavailable; cannot set up CDI. Fix the driver first.")
+        return
+
+    spec_exists = cdi_spec_exists()
+    spec_driver = cdi_spec_driver_version() if spec_exists else ""
+    if spec_exists and spec_driver == driver:
+        print_green(f"CDI spec {CDI_SPEC_PATH} is present and matches "
+                    f"driver {driver}.")
+        return
+
     print("GPU access mode: with the legacy `--gpus all` hook, suspend/resume or")
     print("a `systemctl daemon-reload` on the host can silently revoke the GPU")
     print("from a RUNNING container (CUDA fails until you relaunch). The CDI mode")
     print("declares the GPU in the container spec and is immune to this.")
     print()
 
-    driver = host_driver_version()
-    if not driver:
-        print_red("nvidia-smi unavailable; cannot set up CDI. Fix the driver first.")
-        return
-
-    if cdi_spec_exists():
-        spec_driver = cdi_spec_driver_version()
-        if spec_driver == driver:
-            print_green(f"CDI spec {CDI_SPEC_PATH} is present and matches "
-                        f"driver {driver}.")
-            return
+    if spec_exists:
         print(f"CDI spec {CDI_SPEC_PATH} exists but was generated for driver")
         print(f"{spec_driver or 'unknown'}; host driver is {driver}. It should be")
         print("regenerated (a stale spec can reference missing library paths).")
