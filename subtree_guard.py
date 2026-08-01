@@ -23,12 +23,17 @@ def main():
         text=True,
         check=True,
     ).stdout.splitlines()
-    hits = sorted(path for path in staged if path.startswith(SUBTREES_PREFIX))
+    # Only paths *inside* a vendored copy (subtrees/<name>/...) are protected;
+    # the files directly under subtrees/ (the package marker, the README
+    # pointer) are project-owned.
+    hits = sorted(
+        path for path in staged if path.startswith(SUBTREES_PREFIX) and path.count("/") >= 2
+    )
     if not hits:
         return
     listing = "\n".join(f"  {path}" for path in hits)
     sys.exit(
-        f"Commit blocked: staged changes under {SUBTREES_PREFIX}, a read-only vendored copy:\n"
+        f"Commit blocked: staged changes inside a read-only vendored copy under {SUBTREES_PREFIX}:\n"
         f"{listing}\n"
         "Author the change in the source repo's working clone under the project mount\n"
         "and land it through a PR there; this repo then picks it up with\n"
