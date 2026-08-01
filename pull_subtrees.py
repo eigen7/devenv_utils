@@ -47,13 +47,25 @@ def main():
             ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
         ).stdout.strip()
     )
-    subtrees = sorted(p for p in (toplevel / SUBTREES_DIR).glob("*/") if p.is_dir())
-    if not subtrees:
+    # A vendored subtree is a *committed* directory under subtrees/, so
+    # enumerate the git tree, not the filesystem -- which also holds junk like
+    # the __pycache__ of subtrees/__init__.py.
+    entries = subprocess.run(
+        ["git", "ls-tree", "HEAD", f"{SUBTREES_DIR}/"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=toplevel,
+    ).stdout.splitlines()
+    # ls-tree lines: "<mode> <type> <sha>\t<path>"; the subtrees are the tree entries.
+    fields = [line.split(None, 3) for line in entries]
+    names = sorted(f[3].split("/")[-1] for f in fields if f[1] == "tree")
+    if not names:
         sys.exit(f"No vendored subtrees under {toplevel / SUBTREES_DIR}; nothing to pull.")
     owner = origin_repo(toplevel).split("/")[0]
-    for path in subtrees:
-        prefix = f"{SUBTREES_DIR}/{path.name}"
-        url = f"https://github.com/{owner}/{path.name}.git"
+    for name in names:
+        prefix = f"{SUBTREES_DIR}/{name}"
+        url = f"https://github.com/{owner}/{name}.git"
         print(f"Pulling {prefix} from {url} ...")
         subprocess.run(
             ["git", "subtree", "pull", "--prefix", prefix, url, "main", "--squash"],
