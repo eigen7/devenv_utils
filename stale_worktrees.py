@@ -22,11 +22,13 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    # Enable running this file directly (submodules/devenv_utils/stale_worktrees.py):
-    # put the repo root on sys.path and adopt the package identity so the
-    # relative imports below resolve.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "submodules.devenv_utils"
+    # Enable running this file directly: put the package's parent directory on
+    # sys.path and adopt the package identity so the relative imports resolve.
+    # Works at any nesting -- subtrees/devenv_utils/ in a consumer repo, the
+    # repo root in devenv_utils' own working clone.
+    _package_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, str(_package_dir.parent))
+    __package__ = _package_dir.name
 
 import argparse
 import subprocess
@@ -106,10 +108,10 @@ def describe(stale: StaleWorktree) -> str:
     # A branch-backed worktree is torn down (worktree + local branch, even if
     # unmerged) via the PR workflow tool. A detached-HEAD worktree has no
     # branch to name, so fall back to raw git; --force because git refuses to
-    # remove a worktree whose submodules are populated -- the normal state
-    # here, and the state line above says what --force would discard.
+    # remove a worktree holding untracked files -- build outputs make that the
+    # normal state here, and the state line above says what --force discards.
     if branch is not None:
-        removal = f"submodules/devenv_utils/pr_flow.py abandon {branch}"
+        removal = f"pr_flow.py abandon {branch}"
     else:
         removal = f"git worktree remove --force {stale.worktree.path}"
     return (
@@ -155,4 +157,7 @@ def main(cfg: DevenvConfig):
 
 
 if __name__ == "__main__":
-    main(load_config(Path(__file__).resolve().parents[2]))
+    _toplevel = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    main(load_config(Path(_toplevel)))
