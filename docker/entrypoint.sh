@@ -56,6 +56,14 @@ if [ -n "${DEVENV_GITEA_WEB_URL:-}" ] && \
     "url.${DEVENV_GITEA_WEB_URL}/.insteadOf" "http://localhost:${DEVENV_GITEA_WEB_PORT}/"
 fi
 
+# GitHub access: the launcher bind-mounts the host's token file read-only
+# (see github_access.py). Wire git and token-reading tools (GH_TOKEN) to it.
+# System scope, because ~/.gitconfig is the host's own file bind-mounted in.
+git config --system credential."https://github.com".helper \
+  '!f() { echo "username=x-access-token"; echo "password=$(cat /workspace/github-token)"; }; f'
+echo 'export GH_TOKEN="$(cat /workspace/github-token 2>/dev/null)"' \
+  > /etc/profile.d/github-token.sh
+
 # Per-user dotfiles (idempotent), then exec the requested command as devuser.
 gosu "$USERNAME" /usr/local/bin/devuser-setup.sh
 exec gosu "$USERNAME" "$@"

@@ -11,7 +11,7 @@ import os
 import sys
 from typing import Callable, Optional
 
-from . import gateway_service
+from . import gateway_service, github_access
 from .config import DevenvConfig
 from .console import SetupException
 from .docker_ops import (
@@ -20,7 +20,6 @@ from .docker_ops import (
     is_container_running,
     run_container,
 )
-from .gitea_service import dev_container_args
 from .state import get_env_json, in_docker_container, is_subpath
 
 
@@ -130,13 +129,12 @@ def _launch_fresh(
 
     extra_args = pre_launch(args) if pre_launch is not None else []
 
-    # Wire the dev container up to the shared services -- and start them if they
-    # are stopped: the Gitea service (network membership, env contract,
-    # credentials mount) and the gateway (routing labels, published ports, and
-    # DEVENV_SERVICE_URL_* env derived from the [services] table).
+    # Wire the dev container up to the GitHub token mount (see github_access.py)
+    # and to the gateway service -- starting it if stopped: routing labels,
+    # published ports, and DEVENV_SERVICE_URL_* env derived from [services].
     host_network = "--network=host" in config.extra_docker_args + extra_args
     try:
-        extra_args = extra_args + dev_container_args(host_network)
+        extra_args = extra_args + github_access.dev_container_args()
         extra_args = extra_args + gateway_service.dev_container_args(config, host_network)
     except SetupException as e:
         print(e)
