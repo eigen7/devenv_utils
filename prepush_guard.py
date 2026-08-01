@@ -18,13 +18,23 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    # Enable running this file directly (as git does): put the package's parent
-    # directory on sys.path and adopt the package identity so the relative
-    # imports resolve. Works at any nesting -- subtrees/devenv_utils/ in a
-    # consumer repo, the repo root in devenv_utils' own clone.
-    _package_dir = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_package_dir.parent))
-    __package__ = _package_dir.name
+    # Enable running this file directly (as a CLI tool or git hook): load the
+    # package under its canonical name from this file's own directory, whatever
+    # that directory is called -- subtrees/devenv_utils/ in a consumer repo,
+    # the repo root (or a worktree of it, named after its branch) in
+    # devenv_utils' own working clone.
+    import importlib.util
+
+    _pkg_dir = Path(__file__).resolve().parent
+    _spec = importlib.util.spec_from_file_location(
+        "devenv_utils",
+        _pkg_dir / "__init__.py",
+        submodule_search_locations=[str(_pkg_dir)],
+    )
+    _pkg = importlib.util.module_from_spec(_spec)
+    sys.modules["devenv_utils"] = _pkg
+    _spec.loader.exec_module(_pkg)
+    __package__ = "devenv_utils"
 
 from .state import in_docker_container
 
