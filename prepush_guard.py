@@ -1,86 +1,53 @@
 #!/usr/bin/env python3
-"""Guard `git push` to GitHub origin -- installed as the repo's pre-push hook.
+"""Keep in-container pushes off origin's main -- the repo's pre-push hook.
 
-Publishing to origin goes through `git publish` on the host, which also
-fast-forwards the local checkout and cleans up merged worktrees. A bare
-`git push` to origin is caught here in the two ways it goes wrong:
+The container's GitHub token exists so coding agents can push feature branches
+and open PRs; `main` advances only by merging a PR, or by the user from the
+host. This hook enforces that split: a push from inside the container that
+would update origin's `main` -- including deleting it -- is blocked, while
+host pushes and container pushes to other branches pass untouched. It is the
+client-side stand-in for branch protection, which private repos on GitHub's
+free plan don't get. `git push --no-verify` bypasses deliberately.
 
-  - run inside the container, where the origin credentials don't live, or
-  - run while the local `main` and Gitea's `main` disagree. Gitea ahead means
-    an unpublished browser-merge: a bare push would be a silent no-op (the
-    merge commit isn't local yet), stranding the merge on Gitea. Local ahead
-    means a commit made directly on `main` that bypassed Gitea: pushing it to
-    origin would leave Gitea behind the published history.
-
-Either way the hook stops the push and prints the way out, matched to the
-direction of the mismatch. Pushes to any other remote -- notably Gitea, the
-normal in-container path -- pass through untouched. git invokes the hook with
-the remote name as argv[1] and its URL as argv[2].
+git invokes the hook with the remote name as argv[1] and its URL as argv[2],
+and feeds the pushed ref updates on stdin as
+`<local ref> <local sha> <remote ref> <remote sha>` lines.
 """
 
 import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "submodules.devenv_utils"
+    # Enable running this file directly (as git does): put the package's parent
+    # directory on sys.path and adopt the package identity so the relative
+    # imports resolve. Works at any nesting -- subtrees/devenv_utils/ in a
+    # consumer repo, the repo root in devenv_utils' own clone.
+    _package_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, str(_package_dir.parent))
+    __package__ = _package_dir.name
 
-import subprocess
-
-from .config import DevenvConfig, load_config
-from .gitea_client import SERVICE_CONTAINER
-from .publish import gitea_read_url, main_relationship
 from .state import in_docker_container
 
-LOCAL_AHEAD_ADVICE = "Local main has commits that Gitea's main lacks. Run `git publish`."
-
-DIVERGED_ADVICE = (
-    "Local main and Gitea's main have diverged: each has commits the other lacks.\n"
-    "Run `git publish`."
-)
+PROTECTED_REF = "refs/heads/main"
 
 
 def is_origin_push(remote_name: str, remote_url: str) -> bool:
     return remote_name == "origin" or "github.com" in remote_url
 
 
-def main(cfg: DevenvConfig):
+def main():
     remote_name = sys.argv[1] if len(sys.argv) > 1 else ""
     remote_url = sys.argv[2] if len(sys.argv) > 2 else ""
-    if not is_origin_push(remote_name, remote_url):
+    if not is_origin_push(remote_name, remote_url) or not in_docker_container():
         return
-    if in_docker_container():
+    updates = [line.split() for line in sys.stdin.read().splitlines()]
+    if any(update[2:3] == [PROTECTED_REF] for update in updates):
         sys.exit(
-            "Push to GitHub origin from the HOST, via `git publish` -- not the container "
-            "(the origin credentials live on the host)."
+            f"Push blocked: {PROTECTED_REF} is not updated from inside the container.\n"
+            "Land the change through a pull request (pr_flow.py create), or push from\n"
+            "the host. `git push --no-verify` bypasses deliberately."
         )
-    root = cfg.repo_root
-    probe = subprocess.run(
-        ["git", "ls-remote", gitea_read_url(root), "main"], cwd=root, capture_output=True, text=True
-    )
-    if probe.returncode != 0:
-        # Fail closed: pushing to GitHub around an unreachable Gitea is how a
-        # commit lands on origin that Gitea has never seen -- the diverged
-        # state that cannot be rebased away afterwards.
-        sys.exit(
-            "Could not reach Gitea, so there is no way to check for unpublished\n"
-            "merges; this push to GitHub origin is blocked. Start the service --\n"
-            f"`docker start {SERVICE_CONTAINER}` on the host -- and retry, or push\n"
-            "anyway, deliberately, with `git push --no-verify`."
-        )
-    gitea_main = probe.stdout.split()[0] if probe.stdout.strip() else ""
-    if not gitea_main:
-        return
-    relation = main_relationship(root, gitea_main)
-    if relation == "behind":
-        sys.exit(
-            "Gitea's main has merged commits your local main doesn't have yet.\nRun `git publish`."
-        )
-    if relation == "ahead":
-        sys.exit(LOCAL_AHEAD_ADVICE)
-    if relation == "diverged":
-        sys.exit(DIVERGED_ADVICE)
 
 
 if __name__ == "__main__":
-    main(load_config(Path(__file__).resolve().parents[2]))
+    main()
