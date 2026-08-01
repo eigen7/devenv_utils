@@ -81,6 +81,8 @@ model). What the remaining symptoms mean:
   this (scaffolding, `devenv.toml`, the wizard).
 - **[WORKFLOW.md](WORKFLOW.md)** — the worktree → PR workflow in full;
   written for the coding agent, and pointed at by each consumer's `CLAUDE.md`.
+- **[COMMENTS.md](COMMENTS.md)** — the comment and documentation doctrine;
+  written for the coding agent, and linked from each consumer's `CLAUDE.md`.
 - **[SUBTREES.md](SUBTREES.md)** — the vendored-subtree model: updating the
   copy, changing devenv_utils, coordinated changes.
 - **[GATEWAY.md](GATEWAY.md)** — the machine-wide reverse proxy that routes
