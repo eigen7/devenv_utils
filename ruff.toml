@@ -1,0 +1,5 @@
+# devenv_utils' own formatting/linting config, for working on the standalone
+# clone. Consumers exclude their vendored copy from their own ruff runs, so
+# this is the single source of style here. 100 matches the style the code was
+# written under (the consumers' shared C++/Python column limit).
+line-length = 100

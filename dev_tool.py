@@ -43,8 +43,8 @@ class DevTool:
         """
         parser = argparse.ArgumentParser(
             description="Run clang-format over the project's C++ sources. With "
-                        "--check, report files that would change and exit "
-                        "non-zero if any do; otherwise reformat in place.",
+            "--check, report files that would change and exit "
+            "non-zero if any do; otherwise reformat in place.",
         )
         parser.add_argument(
             "--check",
@@ -87,8 +87,7 @@ class DevTool:
 
     def _clang_format_check(self, files: list[str]) -> None:
         """Report files that clang-format would change; exit 1 if any do."""
-        bad = [os.path.relpath(p, self.repo_root)
-               for p in files if not _clang_format_clean(p)]
+        bad = [os.path.relpath(p, self.repo_root) for p in files if not _clang_format_clean(p)]
         if bad:
             print(f"{len(bad)} file(s) need formatting:")
             for f in bad:
@@ -105,13 +104,14 @@ class DevTool:
 
 
 def _clang_format_available() -> bool:
-    return subprocess.run(
-        ["clang-format", "--version"], capture_output=True
-    ).returncode == 0
+    return subprocess.run(["clang-format", "--version"], capture_output=True).returncode == 0
 
 
 def _clang_format_clean(path: str) -> bool:
     """Return True if *path* already matches clang-format's output."""
-    return subprocess.run(
-        ["clang-format", "--dry-run", "--Werror", path], capture_output=True
-    ).returncode == 0
+    return (
+        subprocess.run(
+            ["clang-format", "--dry-run", "--Werror", path], capture_output=True
+        ).returncode
+        == 0
+    )
