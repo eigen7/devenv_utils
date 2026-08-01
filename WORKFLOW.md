@@ -33,12 +33,18 @@ devenv_utils working clone; run it from the repo the change targets.
 4. `pr_flow.py create <branch> --title ... --body-file ...` — pushes the
    branch to origin and opens its GitHub PR (or reports the one already
    open). It prints the review + merge handoff; relay that to the user.
-5. Address review comments with follow-up commits — not squashes or
+5. Optionally — only when the user asks, or has made it their standing
+   policy — run the shared `pr-review` skill
+   ([skills/pr-review/SKILL.md](skills/pr-review/SKILL.md)): a bounded
+   agentic review cycle (specialized reviewer subagents, adversarial
+   verification, fix-or-rebut) that ends with one summary comment on the
+   PR. Launching it is the user's cost decision.
+6. Address review comments with follow-up commits — not squashes or
    force-pushes, which break the reviewer's "changes since last review" view.
    A plain `git push` from the worktree updates the PR. Review comments are
    readable via the GitHub API (github_access.py) or `gh pr view --comments`
    where `gh` is installed.
-6. Once the user approves, they merge the PR on GitHub. Anyone can then
+7. Once the user approves, they merge the PR on GitHub. Anyone can then
    `git pull` on `main` and run `pr_flow.py cleanup`, which removes the
    worktrees and local branches of merged PRs.
 
