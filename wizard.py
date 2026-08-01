@@ -177,8 +177,8 @@ class SetupWizardTool:
         http://<project>-<service>.localhost dev URLs to its container ports.
         See GATEWAY.md.
 
-        As with the Gitea step, the published port is asked for only when this
-        host has no gateway yet; `gateway_service.py reconfigure` changes it.
+        The published port is asked for only when this host has no gateway
+        yet; `gateway_service.py reconfigure` changes it.
         """
         gateway_wizard_setup(self.config)
 

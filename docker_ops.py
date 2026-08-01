@@ -80,8 +80,7 @@ def image_exists(image: str) -> bool:
 
 # Label recording the inputs a service container was created from, so the
 # managing script can tell a container that already matches the current
-# configuration from one that must be recreated (gitea_service.py,
-# gateway_service.py).
+# configuration from one that must be recreated (gateway_service.py).
 PROVISIONING_LABEL = "devenv.provisioning"
 
 

@@ -45,17 +45,6 @@ chown "$USERNAME":"$USERNAME" /workspace
 mkdir -p /workspace/.home-dir-soft-links
 chown "$USERNAME":"$USERNAME" /workspace/.home-dir-soft-links
 
-# Route git's canonical Gitea remote URLs (http://localhost:<web_port>/, as
-# stored in the repo's shared .git/config) to the devenv-gitea service
-# container (see devenv_utils GITEA.md). System scope, because ~/.gitconfig
-# is the host's own file bind-mounted in. Skipped when the launcher says the
-# canonical URL already resolves from here (host networking).
-if [ -n "${DEVENV_GITEA_WEB_URL:-}" ] && \
-   [ "$DEVENV_GITEA_WEB_URL" != "http://localhost:${DEVENV_GITEA_WEB_PORT}" ]; then
-  git config --system \
-    "url.${DEVENV_GITEA_WEB_URL}/.insteadOf" "http://localhost:${DEVENV_GITEA_WEB_PORT}/"
-fi
-
 # GitHub access: the launcher bind-mounts the host's token file read-only
 # (see github_access.py). Wire git and token-reading tools (GH_TOKEN) to it.
 # System scope, because ~/.gitconfig is the host's own file bind-mounted in.
