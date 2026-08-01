@@ -23,7 +23,10 @@ devenv_utils working clone; run it from the repo the change targets.
    distinguishes Claude's commits from the user's. Worktrees live under the
    mount so in-progress work survives container relaunches.
 2. Make the changes in the worktree, as atomic commits reviewable in
-   isolation. A change under `subtrees/` is blocked by the pre-commit guard:
+   isolation. For substantial work, the user may first ask for a plan
+   review ([skills/plan-review/SKILL.md](skills/plan-review/SKILL.md)): a
+   panel critique of the intended approach before any code is written.
+   A change under `subtrees/` is blocked by the pre-commit guard:
    it belongs in the source repo's working clone
    (`/workspace/mount/devenv_utils`), through this same workflow, as its own
    PR — see SUBTREES.md, including how to test a consumer change against an
