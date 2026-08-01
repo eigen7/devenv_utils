@@ -32,16 +32,21 @@ invocation argument, defaulting to `standard`:
 
 ## Round 1: the panel
 
-Spawn one subagent per reviewer, all in parallel. Reviewers run on a cheaper
-model tier — a narrow rubric is what makes that work — except under
-`thorough`, which runs everything on the session's own tier:
+Spawn one subagent per reviewer, all in parallel — skipping any reviewer
+whose dimension the diff plainly does not touch (a docs-only diff needs no
+correctness or tests pass; the summary says which reviewers were skipped).
+The judgment-call reviewers run on a cheaper model tier — a narrow rubric is
+what makes that work. Correctness runs on the session's own tier: it is the
+one dimension where model quality dominates the rubric, because the bugs
+that survive an authoring agent plus a passing test suite are the subtle
+kind. Under `thorough`, everything runs session-tier.
 
-| Reviewer    | Rubric                     | Model  |
-|-------------|----------------------------|--------|
-| correctness | `reviewers/correctness.md` | sonnet |
-| clean-code  | `reviewers/clean-code.md`  | sonnet |
-| prose       | `reviewers/prose.md`       | sonnet |
-| tests       | `reviewers/tests.md`       | sonnet |
+| Reviewer    | Rubric                     | Model   |
+|-------------|----------------------------|---------|
+| correctness | `reviewers/correctness.md` | session |
+| clean-code  | `reviewers/clean-code.md`  | sonnet  |
+| prose       | `reviewers/prose.md`       | sonnet  |
+| tests       | `reviewers/tests.md`       | sonnet  |
 
 Prompt template for each (fill the bracketed parts; rubric paths made
 absolute):
@@ -49,7 +54,8 @@ absolute):
 > You are one reviewer on a panel reviewing a pull request. Read [rubric
 > path] and adopt it as your entire role. Repo root: [path]. Review range:
 > [base]..[HEAD] — run `git diff`/`git log` yourself. Read as much
-> surrounding code as you need; modify nothing. Report your findings as a
+> surrounding code as you need; modify nothing beyond what your rubric
+> explicitly allows. Report your findings as a
 > YAML list, one entry per finding, with keys: file, line, severity
 > (must-fix | should-fix | nit), claim (one sentence), failure_scenario (a
 > concrete scenario, when your rubric requires one; use a block scalar if it
@@ -62,9 +68,11 @@ absolute):
 
 A reviewer told to find flaws will find flaws, even if it has to invent
 them; the skeptic is the filter that makes the panel's output trustworthy.
-For every must-fix/should-fix finding from the **correctness** reviewer,
-spawn a skeptic subagent on the session's model tier (never a downgraded
-model — refutation is where quality pays):
+A correctness finding demonstrated by execution — the probe and its observed
+output included in the finding — skips the pass entirely: demonstration
+beats refutation. For every other must-fix/should-fix finding from the
+**correctness** reviewer, spawn a skeptic subagent on the session's model
+tier (never a downgraded model — refutation is where quality pays):
 
 > A code reviewer claims the following about the repo at [path], review
 > range [base]..[HEAD]: [the finding, verbatim]. Attempt to REFUTE this claim by
