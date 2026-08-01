@@ -51,22 +51,18 @@ rm -rf <state_dir>                            # Gitea repos/PRs/credentials
 rm ~/.devenv/gitea.json
 ```
 
-(Leave the `devenv` docker network and the `devenv-gateway` container alone —
-the gateway still uses them.)
-
 ## 3. What changed day to day
 
 - **You**: commit and push `main` from the host like any normal repo. Review
   agent PRs on github.com; merge there; `git pull` when convenient.
-- **The agent**: works in a worktree, opens the PR itself
-  (`subtrees/devenv_utils/pr_flow.py`); after a merge,
-  `pr_flow.py cleanup` removes merged worktrees. See
-  `subtrees/devenv_utils/WORKFLOW.md`.
-- **The vendored copy** under `subtrees/` is read-only (a pre-commit hook
-  enforces it). Sync it with `subtrees/devenv_utils/pull_subtrees.py`;
-  changes to devenv_utils itself are authored in the working clone at
-  `<mount>/devenv_utils` and land through that repo's own GitHub PR — see
-  `subtrees/devenv_utils/SUBTREES.md`.
-- **One hard rule, enforced by hook**: never rebase across subtree commits.
-  If a push is rejected after a subtree pull, reconcile with
-  `git pull --no-rebase`.
+- **The agent**: works in a worktree, opens the PR itself.
+
+If you want to look at the worktree state in the IDE, you can use:
+
+```
+git checkout --detach <BRANCH_NAME>
+# ... inspect in the IDE ...
+git checkout main
+```
+
+You can get the `BRANCH_NAME` by running `git branch` - it should match the worktree name.
