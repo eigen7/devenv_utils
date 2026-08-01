@@ -21,10 +21,10 @@ pointer skill** there:
    ---
 
    This skill is shared across devenv_utils consumers. Read
-   submodules/devenv_utils/skills/<name>/SKILL.md and follow it as if its
+   subtrees/devenv_utils/skills/<name>/SKILL.md and follow it as if its
    contents appeared here.
    ```
 
 When a canonical skill's description changes, each consumer's pointer file
-must be updated to match as part of (or following) the pointer bump that
+must be updated to match as part of (or following) the subtree pull that
 brings in the change.

@@ -1,7 +1,7 @@
 # devenv_utils
 
 Reusable machinery for a Docker-based, AI-agent-compatible development
-workflow. Each project pulls it in as a git submodule.
+workflow. Each project vendors it as a git subtree.
 
 This README is for **humans** — how you review and land the changes an agent
 produces. The agent-facing instructions live in [WORKFLOW.md](WORKFLOW.md);
@@ -22,130 +22,66 @@ settings, file-permissions, and more).
 
 `devenv_utils` provides tooling to set all this up for you.
 
-### Coding agents: worktrees, pull requests, submodules
+### Coding agents: worktrees and pull requests
 
 Coding agents (Claude Code and friends) work best on an isolated checkout: a
-**git worktree** per task lets an agent build, test, and commit a change without
-disturbing your working tree or other in-flight work. But you still want to
-**review and approve** those changes the way you'd review a colleague's — a
-GitHub-style pull request in the browser, with a diff and inline comments. So
-this ships a **local Gitea** instance — a machine-wide Docker service container
-that is simply always running (see [GITEA.md](GITEA.md)) — that gives every
-worktree branch a PR page — entirely on your machine, no external service.
-
-It also smooths over a genuinely thorny corner: **git worktrees and git
-submodules interact badly.** Worktree metadata bakes in absolute paths that only
-resolve inside the container; a fresh worktree doesn't populate submodules; and
-publishing a change that spans a submodule must push the submodule commit to its
-upstream *before* the superproject that points at it. The tooling handles all of
-that, so day to day you don't think about it.
+**git worktree** per task lets an agent build, test, and commit a change
+without disturbing your working tree or other in-flight work. You then review
+and approve those changes the way you'd review a colleague's — as a **pull
+request on GitHub**. The container carries a scoped GitHub token (provisioned
+once by the setup wizard) that lets the agent push feature branches and open
+PRs; a pre-push hook keeps it off `main`, which only advances by your merges.
 
 ## The development workflow, from your side
 
 The first time, you run `./setup_wizard.py`. This walks you through one-time
-setup and builds the Docker image.
+setup — including the GitHub token the container will use — and builds the
+Docker image.
 
 After that, you start a development session by running `./run_docker.py`. This
 launches a Docker container and lands you inside of it, like an ssh session
-into a virtual machine.
+into a virtual machine. You launch your IDE and connect to that container;
+agent sessions and IDE state live on mounted directories, so they survive
+container restarts.
 
-You launch your IDE, and connect to that Docker container. You can then interact
-with your AI agent through your IDE, or through a CLI interface launched from
-the container. Your agent sessions and IDE state are preserved across container
-restarts: they live on directories mounted from the host.
+You interact with the agent much as you would a colleague; the machinery
+stays mostly invisible. A typical change:
 
-You interact with the agent much as you would a colleague; the machinery stays
-mostly invisible. A typical change:
+1. **Ask the agent** to implement something.
+2. The agent works in a worktree and hands you a **PR URL** for review on
+   GitHub. Review it like any PR — inline comments, plus direct conversation
+   with the agent — over as many rounds as you need. (The agent's worktree
+   branch also exists locally, so `git checkout <branch>` shows you the code
+   in your own IDE.)
+3. When it looks good, **merge it on GitHub**.
+4. `git pull` when convenient. `pr_flow.py cleanup` (host or container)
+   removes the worktrees and local branches of merged PRs.
 
-1. **Ask the agent** to implement something (say, a feature in the parent repo).
-2. The agent works in a worktree and hands you a **PR URL** for browser review.
-   Review it like a human PR — inline comments on the Gitea page, plus direct
-   conversation with the agent — over as many rounds as you need.
-3. When it looks good, **merge it**: click *Merge* on the Gitea page, run the
-   merge command the agent printed next to the URL, or just ask the agent to
-   merge.
-4. On the host, run **`git publish`** to publish the merge to GitHub. It
-   fast-forwards your local checkout to the merged state, pushes to GitHub (and,
-   for a change that spans a submodule, pushes the submodule commit first, in the
-   order upstream requires), and removes the merged worktree. If histories have
-   drifted — your `main` diverged from Gitea's, or commits reached GitHub around
-   the Gitea flow — it shows the affected commits and asks before merging or
-   rebasing (`?` at the prompt explains the proposed action).
+Committing directly on `main` needs no ceremony: commit and push from the
+host, as in any repo.
 
-Why a dedicated `git publish` rather than `git push`? Merging on Gitea only
-advances Gitea's copy — the merge commit isn't in your local checkout yet, so a
-plain `git push` has nothing to send and would silently do nothing. And for a
-submodule-spanning change, only `git publish` gets the push ordering right. So
-you don't get caught by the silent no-op, a **pre-push hook redirects a stray
-`git push` to `git publish`** whenever a merge is waiting to be published — and
-blocks the push outright when Gitea is unreachable, since publishing around
-Gitea is how histories diverge (`git push --no-verify` bypasses deliberately).
-(The hooks are installed by `./setup_wizard.py`, not automatically on clone.)
+## The vendored subtree, day to day
 
-## Committing directly on main
+`subtrees/devenv_utils` is a **read-only vendored copy** of this repo,
+updated by `git subtree pull` (see [SUBTREES.md](SUBTREES.md) for the full
+model). What the remaining symptoms mean:
 
-You don't have to route every change through a PR — a quick tweak committed
-straight to `main` is fully supported. Hooks installed by the wizard keep the
-two `main`s in lockstep so the PR flow and direct commits can't drift apart
-(see commit_guard.py):
-
-- Each commit or merge on `main` is **automatically mirrored to Gitea**
-  (`git push gitea main`, printed as `mirrored main -> gitea`). This touches
-  only the local review service, never GitHub.
-- A commit on `main` is **refused while Gitea holds merges you haven't
-  published yet** — your change is still safely uncommitted at that point;
-  run `git publish`, then commit. `git commit --no-verify` bypasses.
-- **Rewriting `main` mirrors too.** `git commit --amend` on a tip Gitea has
-  already mirrored replaces Gitea's copy, printing `mirrored rewritten main ->
-  gitea (replaced abc123def)`. Gitea's `main` only ever advances by a PR merge
-  or by this mirror, so a tip your own checkout wrote and then rewrote holds
-  nothing worth keeping.
-- The rewrite is **refused when GitHub already has the commit**, or when
-  nothing proves the commit came from this checkout. Published history is not
-  discardable, so `git publish` reports the divergence and lets you resolve it.
-- `git publish` handles the leftover case itself: if a mirror push didn't
-  land (say, the service was down), publish syncs Gitea before publishing.
-
-Feature branches and worktrees are untouched by all of this.
-
-## Submodules day to day
-
-`submodules/devenv_utils` is a git submodule: a nested checkout of its own
-repo, pinned by the parent repo to one exact commit (see
-[SUBMODULES.md](SUBMODULES.md) for the full model). The wizard's git config
-and hooks absorb most of the usual submodule friction; here is what the
-remaining symptoms mean and what to do about them:
-
-- **A fresh clone has an empty `submodules/devenv_utils/`.** Run any entry
-  point (`./setup_wizard.py`, `./run_docker.py`) — each populates it before
-  doing anything else. (`git clone --recurse-submodules` avoids the empty
-  state entirely.)
-- **`git status` shows `modified: submodules/devenv_utils (new commits)`.**
-  The nested checkout sits at a different commit than the parent records;
-  status lists the commits in between. After `pull`, `checkout`, `rebase`,
-  or a merge, hooks re-sync it automatically (printing
-  `synced submodules/devenv_utils -> <sha>`), so seeing this usually means
-  the checkout has real local work — or hooks aren't installed (re-run
-  `./setup_wizard.py`). To sync by hand: `git submodule update --init`.
-- **A commit is refused with "would move the submodule ... backward".**
-  That's the guard against the classic accident: a stale nested checkout
-  swept up by a broad `git add`, which would silently pin the parent to an
-  *older* devenv_utils. Run the two commands the message prints; use
-  `git commit --no-verify` only if the rewind is truly intended.
-- **`git stash` ignores edits under `submodules/devenv_utils/`.** Stash
-  works per-repo; stash inside the nested repo instead:
-  `git -C submodules/devenv_utils stash`.
-- **Editing files under `submodules/devenv_utils/`** means committing twice
-  — once inside the submodule, once for the parent's pointer bump. The
-  agent's PR flow does this for you; the rules are in
-  [SUBMODULES.md](SUBMODULES.md).
+- **A commit is refused with "staged changes under subtrees/".** That's the
+  guard: edits go in the working clone at `<mount>/devenv_utils` and land
+  through a PR there, after which consumers pull the update. The refusal
+  message says exactly this; `git commit --no-verify` bypasses deliberately.
+- **Pulling an update**: the `git subtree pull --squash` command in
+  SUBTREES.md; each sync is one reviewable commit.
+- Otherwise it behaves like any committed directory: clones, worktrees,
+  stash, and status need nothing special.
 
 ## Docs
 
-- **[CONSUMER_SETUP.md](CONSUMER_SETUP.md)** — set up a new project to use this
-  (scaffolding, `devenv.toml`, wiring `setup_git_config()`).
-- **[WORKFLOW.md](WORKFLOW.md)** — the worktree → PR → publish workflow in full;
+- **[CONSUMER_SETUP.md](CONSUMER_SETUP.md)** — set up a new project to use
+  this (scaffolding, `devenv.toml`, the wizard).
+- **[WORKFLOW.md](WORKFLOW.md)** — the worktree → PR workflow in full;
   written for the coding agent, and pointed at by each consumer's `CLAUDE.md`.
-- **[GITEA.md](GITEA.md)** — how the machine-wide Gitea service container works
-  (design, URLs, auth, lifecycle, migration).
-- **[SUBMODULES.md](SUBMODULES.md)** — rules for changing this submodule.
+- **[SUBTREES.md](SUBTREES.md)** — the vendored-subtree model: updating the
+  copy, changing devenv_utils, coordinated changes.
+- **[GATEWAY.md](GATEWAY.md)** — the machine-wide reverse proxy that routes
+  each project's dev-server URLs.
