@@ -15,6 +15,14 @@ here instead of restating the rules.
 ## Updating the vendored copy
 
 ```bash
+subtrees/devenv_utils/pull_subtrees.py
+```
+
+pulls every vendored subtree up to its upstream `main`. It wraps the raw
+form, needed only when pulling from somewhere other than upstream (see the
+coordinated-change recipe below):
+
+```bash
 git subtree pull --prefix subtrees/devenv_utils \
     https://github.com/eigen7/devenv_utils.git main --squash
 ```

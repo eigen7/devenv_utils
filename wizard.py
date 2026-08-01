@@ -85,27 +85,16 @@ class SetupWizardTool:
         "pre-commit": [("subtree_guard.py", "")],
     }
 
-    # Hook names the pre-subtree (submodule + Gitea) workflow installed;
-    # removed on re-install so a migrated checkout stops invoking machinery
-    # that no longer exists.
+    # Hook names an earlier revision of the workflow installed; removed on
+    # re-install so a migrated checkout stops invoking machinery that no
+    # longer exists.
     LEGACY_HOOKS = ("post-commit", "post-merge", "post-checkout")
 
     def setup_git_config(self):
         """Install the GIT_HOOKS guards, clearing core.hooksPath so git uses
-        the repo's default hooks directory, where they are written. Also
-        removes the git settings the pre-subtree (submodule + Gitea) workflow
-        needed, so re-running the wizard migrates an old checkout.
-        """
+        the repo's default hooks directory, where they are written."""
         repo_root = self.config.repo_root
-        for key in (
-            "core.hooksPath",
-            "submodule.recurse",
-            "push.recurseSubmodules",
-            "status.submodulesummary",
-            "diff.submodule",
-            "alias.publish",
-        ):
-            subprocess.run(["git", "config", "--unset", key], cwd=repo_root, check=False)
+        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo_root, check=False)
         self._install_git_hooks(repo_root)
         print_green("Installed the workflow git hooks.")
 

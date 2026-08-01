@@ -4,10 +4,10 @@ All worktrees of a repository share one common git dir -- the primary
 checkout's .git -- so the primary checkout is resolvable from inside any
 worktree. Two callers depend on getting this right:
 
-* The PR workflow (pr_flow.py) must run its git operations -- fast-forwarding
-  main, sourcing submodule commits and the setup stamp, locating a feature
-  worktree to remove -- against the *primary* checkout, never whichever
-  worktree's shim happened to invoke the tool.
+* The PR workflow (pr_flow.py) must run its git operations -- pushing a
+  branch, sourcing the setup stamp, locating a feature worktree to remove --
+  against the *primary* checkout, never whichever worktree happened to invoke
+  the tool.
 * The stale-worktree report (stale_worktrees.py) lists every *secondary*
   worktree, i.e. every worktree that is not the primary checkout.
 
