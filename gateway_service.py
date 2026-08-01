@@ -13,13 +13,13 @@ labels, published ports, and `DEVENV_SERVICE_URL_*` env from its `[services]`
 table. The interactive path is `SetupWizardTool.setup_gateway_service()`, or
 running this module directly from a consumer repo on the host:
 
-  submodules/devenv_utils/gateway_service.py
+  subtrees/devenv_utils/gateway_service.py
 
 The published port is machine-wide -- it is the port in every project's dev
 URLs -- so it is chosen once, at first provisioning, and changed only through
 a deliberate separate step:
 
-  submodules/devenv_utils/gateway_service.py reconfigure
+  subtrees/devenv_utils/gateway_service.py reconfigure
 
 The dev-container launcher calls dev_container_args() to attach a container's
 routes and env, and launch_urls() to print the service -> URL table.
@@ -29,11 +29,23 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    # Enable running this file directly (submodules/devenv_utils/gateway_service.py):
-    # put the repo root on sys.path and adopt the package identity so the
-    # relative imports below resolve.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "submodules.devenv_utils"
+    # Enable running this file directly (as a CLI tool): load the package
+    # under its canonical name from this file's own directory, whatever that
+    # directory is called -- subtrees/devenv_utils/ in a consumer repo, the
+    # repo root (or a worktree of it, named after its branch) in
+    # devenv_utils' own working clone.
+    import importlib.util
+
+    _pkg_dir = Path(__file__).resolve().parent
+    _spec = importlib.util.spec_from_file_location(
+        "devenv_utils",
+        _pkg_dir / "__init__.py",
+        submodule_search_locations=[str(_pkg_dir)],
+    )
+    _pkg = importlib.util.module_from_spec(_spec)
+    sys.modules["devenv_utils"] = _pkg
+    _spec.loader.exec_module(_pkg)
+    __package__ = "devenv_utils"
 
 import argparse
 import json
@@ -78,12 +90,12 @@ STARTUP_TIMEOUT_S = 30
 
 NOT_PROVISIONED_MESSAGE = (
     "The gateway service has not been set up on this host. Run ./setup_wizard.py "
-    "(or submodules/devenv_utils/gateway_service.py) first."
+    "(or subtrees/devenv_utils/gateway_service.py) first."
 )
 
 EXISTING_SERVICE_NOTICE = (
     "The port is machine-wide, so the wizard leaves it alone. To change it:\n"
-    "    submodules/devenv_utils/gateway_service.py reconfigure"
+    "    subtrees/devenv_utils/gateway_service.py reconfigure"
 )
 
 PORT_CHANGE_NOTICE = (
@@ -462,4 +474,7 @@ def main(cfg: DevenvConfig):
 
 
 if __name__ == "__main__":
-    main(load_config(Path(__file__).resolve().parents[2]))
+    _toplevel = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    main(load_config(Path(_toplevel)))
