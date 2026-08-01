@@ -24,11 +24,11 @@ Work from the PR's worktree, with the branch pushed. Compute the review range
 `$(git merge-base origin/main HEAD)..HEAD`, and resolve the profile from the
 invocation argument, defaulting to `standard`:
 
-| Profile    | Panel                       | Skeptics per finding | Rounds |
-|------------|-----------------------------|----------------------|--------|
-| `light`    | correctness, simplification | none                 | 1      |
-| `standard` | all four                    | 1                    | 2      |
-| `thorough` | all four, session-tier      | 3, majority verdict  | 2      |
+| Profile    | Panel                   | Skeptics per finding | Rounds |
+|------------|-------------------------|----------------------|--------|
+| `light`    | correctness, clean-code | none                 | 1      |
+| `standard` | all four                | 1                    | 2      |
+| `thorough` | all four, session-tier  | 3, majority verdict  | 2      |
 
 ## Round 1: the panel
 
@@ -36,12 +36,12 @@ Spawn one subagent per reviewer, all in parallel. Reviewers run on a cheaper
 model tier — a narrow rubric is what makes that work — except under
 `thorough`, which runs everything on the session's own tier:
 
-| Reviewer       | Rubric                          | Model  |
-|----------------|---------------------------------|--------|
-| correctness    | `reviewers/correctness.md`      | sonnet |
-| simplification | `reviewers/simplification.md`   | sonnet |
-| prose          | `reviewers/prose.md`            | sonnet |
-| tests          | `reviewers/tests.md`            | sonnet |
+| Reviewer    | Rubric                     | Model  |
+|-------------|----------------------------|--------|
+| correctness | `reviewers/correctness.md` | sonnet |
+| clean-code  | `reviewers/clean-code.md`  | sonnet |
+| prose       | `reviewers/prose.md`       | sonnet |
+| tests       | `reviewers/tests.md`       | sonnet |
 
 Prompt template for each (fill the bracketed parts; rubric paths made
 absolute):
@@ -50,10 +50,11 @@ absolute):
 > path] and adopt it as your entire role. Repo root: [path]. Review range:
 > [base]..[HEAD] — run `git diff`/`git log` yourself. Read as much
 > surrounding code as you need; modify nothing. Report your findings as a
-> JSON list, each entry: {"file": ..., "line": ..., "severity": "must-fix" |
-> "should-fix" | "nit", "claim": one sentence, "failure_scenario": concrete
-> scenario when your rubric requires one, "suggestion": the fix in one
-> sentence}. An empty list is a fully successful review — do not manufacture
+> YAML list, one entry per finding, with keys: file, line, severity
+> (must-fix | should-fix | nit), claim (one sentence), failure_scenario (a
+> concrete scenario, when your rubric requires one; use a block scalar if it
+> runs long), suggestion (the fix in one sentence). An empty list is a fully
+> successful review — do not manufacture
 > findings to appear useful. Nits are advisory: report at most a handful,
 > and only ones you would actually raise with a colleague.
 
@@ -66,7 +67,7 @@ spawn a skeptic subagent on the session's model tier (never a downgraded
 model — refutation is where quality pays):
 
 > A code reviewer claims the following about the repo at [path], review
-> range [base]..[HEAD]: [finding JSON]. Attempt to REFUTE this claim by
+> range [base]..[HEAD]: [the finding, verbatim]. Attempt to REFUTE this claim by
 > reading the code, running targeted commands if needed. Default to REFUTED
 > if the failure scenario does not concretely hold. Answer with a verdict —
 > REFUTED, CONFIRMED, or PLAUSIBLE — and a two-sentence justification.
