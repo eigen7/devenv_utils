@@ -33,17 +33,6 @@ non-squash pulls must not be mixed within one repo. The pull creates a merge
 commit, which git commits without running pre-commit — so the read-only guard
 never gets in its way.
 
-## Rebase hazard
-
-Never rebase across subtree commits. A subtree pull is a squash commit whose
-tree is rooted at the *source repo*, tied into place by a merge commit;
-rebase linearizes the merge away and replays the squash commit as an ordinary
-patch, spilling source-repo files into the consumer's root. So when a push is
-rejected because origin moved (say, a PR merged while you pulled), reconcile
-with a merge — `git pull --no-rebase` — and push again. pull_subtrees.py
-refuses to start from a branch that is behind origin/main, so the trap can't
-be entered through the routine path.
-
 ## Changing devenv_utils
 
 Changes are authored in the **working clone** at `<mount>/devenv_utils`

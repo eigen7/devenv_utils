@@ -48,10 +48,10 @@ def main():
             ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
         ).stdout.strip()
     )
-    # Refuse to pull onto a branch that is behind origin: the pending push
-    # would be rejected, and the tempting way out -- rebase -- linearizes the
-    # subtree merge and spills source-repo files into the consumer's root
-    # (see SUBTREES.md, "Rebase hazard"). Reconciling first avoids the trap.
+    # Refuse to pull onto a branch that is behind origin: the pull's push
+    # would be rejected, forcing a reconciliation with subtree commits in
+    # flight (rebase_guard.py polices the dangerous form of that). Pulling
+    # from a current branch avoids the whole situation.
     subprocess.run(["git", "fetch", "--quiet", "origin", "main"], cwd=toplevel, check=True)
     behind = (
         subprocess.run(
@@ -60,10 +60,7 @@ def main():
         != 0
     )
     if behind:
-        sys.exit(
-            "This branch is behind origin/main. Reconcile first -- with a merge\n"
-            "(`git pull --no-rebase`), never a rebase across subtree commits -- then rerun."
-        )
+        sys.exit("This branch is behind origin/main; run `git pull --no-rebase`, then rerun.")
     # A vendored subtree is a *committed* directory under subtrees/, so
     # enumerate the git tree, not the filesystem -- which also holds junk like
     # the __pycache__ of subtrees/__init__.py.
