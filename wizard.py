@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import github_access
 from .config import DevenvConfig
 from .console import SetupException, print_green, print_red, print_rule, yes_no
 from .docker_ops import (
@@ -23,7 +24,6 @@ from .docker_ops import (
     major_version,
 )
 from .gateway_service import wizard_setup as gateway_wizard_setup
-from .gitea_service import wizard_setup as gitea_wizard_setup
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json
 from .vscode_attach import (
@@ -77,63 +77,47 @@ class SetupWizardTool:
     # Git hooks installed into the repo's shared hooks directory:
     # hook name -> ordered (devenv_utils script, extra args) entries, run in
     # sequence; a failing entry aborts the hook and skips the rest.
-    # prepush_guard.py steers a stray `git push` to GitHub origin back to
-    # `git publish`; commit_guard.py keeps direct commits on `main` in
-    # lockstep with Gitea; submodule_guard.py blocks backward submodule
-    # pointer moves and re-syncs stale submodule checkouts after
-    # rebase/merge (see each script's docstring).
+    # subtree_guard.py blocks direct edits to the read-only vendored subtrees;
+    # prepush_guard.py keeps in-container pushes off origin's main (see each
+    # script's docstring).
     GIT_HOOKS = {
         "pre-push": [("prepush_guard.py", ' "$@"')],
-        "pre-commit": [("commit_guard.py", " pre-commit"), ("submodule_guard.py", " pre-commit")],
-        "post-commit": [("commit_guard.py", " post-commit")],
-        "post-merge": [("commit_guard.py", " post-merge"), ("submodule_guard.py", " sync")],
-        "post-checkout": [("submodule_guard.py", " sync")],
+        "pre-commit": [("subtree_guard.py", "")],
     }
 
+    # Hook names the pre-subtree (submodule + Gitea) workflow installed;
+    # removed on re-install so a migrated checkout stops invoking machinery
+    # that no longer exists.
+    LEGACY_HOOKS = ("post-commit", "post-merge", "post-checkout")
+
     def setup_git_config(self):
-        """Apply the git settings the workflow depends on (SUBMODULES.md).
-
-        - submodule.recurse=true: `git pull` / `git checkout` update each
-          submodule working tree to match the commit the superproject
-          records, so a checkout can't silently go stale.
-        - push.recurseSubmodules=check: git refuses to push a commit whose
-          submodule pointer references a commit absent from the submodule's
-          remote, which would break every other clone.
-        - status.submodulesummary=1 / diff.submodule=log: status and diff
-          describe a submodule pointer change by the commits it spans (with
-          a `(rewind)` marker on backward moves) instead of by raw SHAs.
-        - alias.publish: `git publish` runs publish.py (the host-side publish
-          step).
-        - the GIT_HOOKS guards: the pre-push origin guard, the
-          pre/post-commit + post-merge hooks that keep direct `main` commits
-          in lockstep with Gitea, and the submodule_guard hooks (backward
-          pointer moves blocked at commit time; stale submodule checkouts
-          re-synced after rebase/merge).
-
-        Clears core.hooksPath so git uses the repo's default hooks directory,
-        where the hooks are installed.
+        """Install the GIT_HOOKS guards, clearing core.hooksPath so git uses
+        the repo's default hooks directory, where they are written. Also
+        removes the git settings the pre-subtree (submodule + Gitea) workflow
+        needed, so re-running the wizard migrates an old checkout.
         """
         repo_root = self.config.repo_root
-        publish = '!"$(git rev-parse --show-toplevel)"/submodules/devenv_utils/publish.py'
-        for key, value in [
-            ("submodule.recurse", "true"),
-            ("push.recurseSubmodules", "check"),
-            ("status.submodulesummary", "1"),
-            ("diff.submodule", "log"),
-            ("alias.publish", publish),
-        ]:
-            subprocess.run(["git", "config", key, value], cwd=repo_root, check=True)
-        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo_root, check=False)
+        for key in (
+            "core.hooksPath",
+            "submodule.recurse",
+            "push.recurseSubmodules",
+            "status.submodulesummary",
+            "diff.submodule",
+            "alias.publish",
+        ):
+            subprocess.run(["git", "config", "--unset", key], cwd=repo_root, check=False)
         self._install_git_hooks(repo_root)
-        print_green("Configured git for submodule syncing, `git publish`, and the workflow hooks.")
+        print_green("Installed the workflow git hooks.")
 
     @classmethod
-    def _install_git_hooks(cls, repo_root: Path):
+    def _install_git_hooks(cls, repo_root: Path, tools_dir: str = "subtrees/devenv_utils"):
         """Write each GIT_HOOKS entry into the repo's shared hooks directory.
 
-        The hooks directory is shared by every worktree, and each hook resolves
-        the devenv_utils script through its own worktree's checkout -- so a
-        worktree whose pinned devenv_utils predates a given script must be
+        `tools_dir` locates the hook scripts relative to a checkout root: the
+        vendored subtree in a consumer repo, "." in devenv_utils' own working
+        clone. The hooks directory is shared by every worktree, and each hook
+        resolves the script through its own worktree's checkout -- so a
+        worktree whose vendored copy predates a given script must be
         tolerated: the hook no-ops when the script doesn't exist there.
         """
         common_dir = subprocess.run(
@@ -148,25 +132,42 @@ class SetupWizardTool:
         for name, entries in cls.GIT_HOOKS.items():
             lines = ["#!/bin/sh", 'top="$(git rev-parse --show-toplevel)"']
             for script, args in entries:
-                lines.append(f'tool="$top/submodules/devenv_utils/{script}"')
+                lines.append(f'tool="$top/{tools_dir}/{script}"')
                 lines.append(f'[ ! -x "$tool" ] || "$tool"{args} || exit $?')
             hook = hooks_dir / name
             hook.write_text("\n".join(lines) + "\n")
             hook.chmod(0o755)
+        for name in cls.LEGACY_HOOKS:
+            (hooks_dir / name).unlink(missing_ok=True)
 
-    # ---- Step: Gitea service -------------------------------------------
+    # ---- Step: GitHub access -------------------------------------------
 
-    def setup_gitea_service(self):
-        """Provision (or adopt) the machine-wide Gitea service container and
-        register this repo on it. See GITEA.md; call after setup_mount_dir
-        (legacy in-mount state detection) and the docker checks.
+    def setup_github_access(self):
+        """Provision the GitHub token the dev container uses to push feature
+        branches and open PRs (see github_access.py). Quiet on re-runs while
+        the stored token still authenticates."""
+        github_access.wizard_setup(self.config)
 
-        Only a host with no service yet is asked for the web port and state dir:
-        both are shared by every project on the machine, so changing them is a
-        separate deliberate step (`gitea_service.py reconfigure`) rather than a
-        wizard prompt every re-run has to answer correctly.
+    # ---- Step: devenv_utils working clone ------------------------------
+
+    def setup_devenv_clone(self):
+        """Ensure the devenv_utils working clone at <mount>/devenv_utils.
+
+        Consumers vendor devenv_utils as a read-only subtree; changes to it
+        are authored in this clone and land through its own GitHub PRs (see
+        SUBTREES.md). It lives under the mount so the container can reach it
+        and in-progress work survives relaunches. Call after setup_mount_dir.
         """
-        gitea_wizard_setup(self.config)
+        mount_dir = get_env_json(self.config.env_json_path).get("MOUNT_DIR")
+        assert mount_dir, "setup_devenv_clone requires setup_mount_dir to have run."
+        clone = Path(mount_dir) / "devenv_utils"
+        if clone.exists():
+            print_green(f"devenv_utils working clone already present: {clone}")
+        else:
+            subprocess.run(
+                ["git", "clone", github_access.DEVENV_UTILS_REPO_URL, str(clone)], check=True
+            )
+        self._install_git_hooks(clone, tools_dir=".")
 
     # ---- Step: gateway service -----------------------------------------
 
@@ -176,8 +177,8 @@ class SetupWizardTool:
         http://<project>-<service>.localhost dev URLs to its container ports.
         See GATEWAY.md.
 
-        As with the Gitea step, the published port is asked for only when this
-        host has no gateway yet; `gateway_service.py reconfigure` changes it.
+        The published port is asked for only when this host has no gateway
+        yet; `gateway_service.py reconfigure` changes it.
         """
         gateway_wizard_setup(self.config)
 

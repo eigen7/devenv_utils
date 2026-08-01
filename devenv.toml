@@ -1,0 +1,7 @@
+# Minimal devenv configuration for devenv_utils' own working clone (the one
+# the wizard provisions under a project mount; see SUBTREES.md). It exists so
+# the worktree/PR tooling (pr_flow.py) works here the same way it does in a
+# consumer repo. devenv_utils has no dev container of its own, so nothing else
+# is configured.
+
+name = "devenv_utils"

@@ -49,15 +49,18 @@ from .docker_ops import (
     build_image,
     container_exists,
     container_label,
+    docker,
     image_id,
     is_container_running,
     running_containers_with_env,
 )
-from .gitea_client import DEVENV_NETWORK
-from .gitea_service import ensure_network
 from .state import in_docker_container
 
 SERVICE_CONTAINER = IMAGE = "devenv-gateway"
+
+# User-defined Docker bridge network joining dev containers to the gateway, so
+# it can route to them by DNS name.
+DEVENV_NETWORK = "devenv"
 DOCKER_CONTEXT = Path(__file__).resolve().parent / "docker" / "gateway"
 CONFIG_PATH = Path.home() / ".devenv" / "gateway.json"
 
@@ -226,6 +229,11 @@ def launch_urls(config: DevenvConfig, host_network: bool) -> dict[str, str]:
 
 
 # ---- Docker plumbing -----------------------------------------------------
+
+
+def ensure_network():
+    if docker("network", "inspect", DEVENV_NETWORK).returncode != 0:
+        subprocess.run(["docker", "network", "create", DEVENV_NETWORK], check=True)
 
 
 def provisioning_signature(service: dict) -> str:

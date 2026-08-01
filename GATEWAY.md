@@ -5,16 +5,15 @@ single machine-wide reverse proxy ("the gateway") that routes
 `http://<project>-<service>.localhost` hostnames to container ports, instead
 of each project publishing host ports of its own.
 
-This is both the design rationale and the operational reference. The Gitea
-service container that the gateway is modeled on is documented in
-[GITEA.md](GITEA.md); the per-project configuration it consumes is the
-`[services]` table in `devenv.toml` (see [CONSUMER_SETUP.md](CONSUMER_SETUP.md)).
+This is both the design rationale and the operational reference. The
+per-project configuration it consumes is the `[services]` table in
+`devenv.toml` (see [CONSUMER_SETUP.md](CONSUMER_SETUP.md)).
 
 ## Overview
 
 - **Container** `devenv-gateway`, a [Traefik](https://traefik.io) instance
   from the local image `devenv-gateway` (built from
-  [docker/gateway/](docker/gateway/)). Like `devenv-gitea` it runs with
+  [docker/gateway/](docker/gateway/)). It runs with
   `--restart unless-stopped`: one instance per machine, always on, lifecycle
   independent of any dev container.
 - **One published host port** for all projects: `127.0.0.1:<http_port>`
@@ -150,12 +149,6 @@ currently knows when a URL misbehaves. Like everything else it is reachable
 only from the host's loopback.
 
 ### What stays off the gateway
-
-**Gitea.** The Gitea remote URL is written into every repo's `.git/config`
-and must work for host-side git without a browser in the loop
-([GITEA.md](GITEA.md)); rerouting it through the gateway would churn that
-canonical URL scheme for no benefit. The two service containers are
-siblings, not layers.
 
 **Loopback-by-design servers.** A server that binds `127.0.0.1` inside the
 container on purpose (e.g. an API holding credentials, fronted by a dev

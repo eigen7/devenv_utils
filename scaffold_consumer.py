@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Scaffold the thin consumer-side glue for a repo that submodules devenv_utils.
+"""Scaffold the thin consumer-side glue for a repo that vendors devenv_utils.
 
-Run from the consumer repo root, AFTER adding the submodule:
+Run from the consumer repo root, AFTER adding the subtree:
 
-    git submodule add https://github.com/eigen7/devenv_utils.git \\
-        submodules/devenv_utils
-    python3 submodules/devenv_utils/scaffold_consumer.py
+    git subtree add --prefix subtrees/devenv_utils \\
+        https://github.com/eigen7/devenv_utils.git main --squash
+    python3 subtrees/devenv_utils/scaffold_consumer.py
 
 It writes the generic glue (never overwriting an existing file):
 
-    submodules/__init__.py    package marker so `submodules.devenv_utils` imports
-    submodules/README.md      pointer to the submodule workflow doc
+    subtrees/__init__.py      package marker so `subtrees.devenv_utils` imports
+    subtrees/README.md        pointer to the vendored-subtree rules
     py/setup_check.py         import bridge for py/ entrypoints
     devenv.toml               project config TEMPLATE (fill in)
     setup_common.py           loads devenv.toml + any project-specific constants
@@ -19,36 +19,34 @@ It writes the generic glue (never overwriting an existing file):
     run_docker.py             launches (or attaches to) the dev container
 
 The PR-workflow tools need no per-project shim: run them straight from the
-submodule (submodules/devenv_utils/pr_flow.py, gitea_service.py,
-stale_worktrees.py) -- each reads the project's devenv.toml itself.
+subtree (subtrees/devenv_utils/pr_flow.py, stale_worktrees.py) -- each reads
+the invoking repo's devenv.toml itself.
 
 Then: fill in devenv.toml, write docker-setup/Dockerfile, and point your
-CLAUDE.md at submodules/devenv_utils/SUBMODULES.md. See CONSUMER_SETUP.md.
+CLAUDE.md at subtrees/devenv_utils/WORKFLOW.md. See CONSUMER_SETUP.md.
 """
 
 import sys
 from pathlib import Path
 
-# This script lives at <repo>/submodules/devenv_utils/scaffold_consumer.py.
+# This script lives at <repo>/subtrees/devenv_utils/scaffold_consumer.py.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _FILES = {
-    "submodules/__init__.py": '''\
-"""Package root for the git submodules under submodules/ (see README.md).
+    "subtrees/__init__.py": '''\
+"""Package root for the vendored subtrees under subtrees/ (see README.md).
 
-This file exists so submodule packages can be imported as `submodules.<name>`
-from the repo root. It is a project-owned file, not part of any submodule.
+This file exists so vendored packages can be imported as `subtrees.<name>`
+from the repo root. It is a project-owned file, not part of any subtree.
 """
 ''',
-    "submodules/README.md": """\
-This directory contains git submodules: full checkouts of repos we control,
-each pinned to a commit. The workflow -- changing a submodule, pointer-bump
-rules, first-clone initialization, worktree interactions -- is documented in
-[devenv_utils/SUBMODULES.md](devenv_utils/SUBMODULES.md). Read it before
-touching anything under this directory.
-
-A plain `git clone` leaves the submodules empty; the first run of any
-host-side script populates them (see the stanza atop setup_common.py).
+    "subtrees/README.md": """\
+This directory contains vendored git subtrees: read-only copies of repos we
+control, updated by `git subtree pull` and never edited in place (a
+pre-commit hook enforces this). The rules -- updating a copy, changing the
+source repo, coordinated changes -- are documented in
+[devenv_utils/SUBTREES.md](devenv_utils/SUBTREES.md). Read it before touching
+anything under this directory.
 """,
     "py/setup_check.py": '''\
 """Import the repo-root `setup_common` from the py/ entrypoints.
@@ -71,7 +69,7 @@ def import_setup_common():
     return setup_common
 ''',
     "devenv.toml": """\
-# Declarative devenv configuration, read by submodules/devenv_utils
+# Declarative devenv configuration, read by subtrees/devenv_utils
 # load_config() into a DevenvConfig. Every key is a DevenvConfig field;
 # path-valued keys are resolved relative to this file's directory.
 
@@ -83,7 +81,7 @@ name = "CHANGE_ME"
 setup_version = "1.0.0"
 
 # HTTP services run_docker.py should route through the gateway, as
-# http://<name>-<service>.localhost (see submodules/devenv_utils/GATEWAY.md).
+# http://<name>-<service>.localhost (see subtrees/devenv_utils/GATEWAY.md).
 # Each value is a container port, or {port, publish} to also publish
 # 127.0.0.1:<port> for non-HTTP traffic.
 # [services]
@@ -92,32 +90,23 @@ setup_version = "1.0.0"
     "setup_common.py": '''\
 """Project-specific devenv configuration for THIS project.
 
-The generic host-side machinery lives in the `submodules/devenv_utils` git
-submodule. The static DevenvConfig fields live as data in the repo-root
+The generic host-side machinery lives in the vendored `subtrees/devenv_utils`
+copy. The static DevenvConfig fields live as data in the repo-root
 `devenv.toml`; this module loads them and is where any project-specific
 constants go. It lives at the repo root so host-side scripts can import it
 without PYTHONPATH.
 """
 
-import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
-
-# submodules/devenv_utils is a git submodule, so a clone made without
-# --recurse-submodules leaves its directory empty. Every host-side entry point
-# imports this module before anything else, so populating the submodule here --
-# before the imports below -- makes a plain `git clone` just work.
-if not (REPO_ROOT / "submodules" / "devenv_utils" / "__init__.py").exists():
-    subprocess.run(["git", "submodule", "update", "--init"],
-                   cwd=REPO_ROOT, check=True)
-
-from submodules.devenv_utils import (  # noqa: E402
+from subtrees.devenv_utils import (
     DevenvConfig,
     DevTool,
     load_config,
     check_setup_version as _check_setup_version,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent
 
 
 def check_setup_version():
@@ -138,21 +127,23 @@ def make_config() -> DevenvConfig:
 """Interactive first-time setup for this project.
 
 Run this *outside* the Docker container. It:
-  1. Applies the git settings that keep the checkouts under submodules/ in
-     sync (see submodules/devenv_utils/SUBMODULES.md).
+  1. Installs the workflow git hooks (the read-only guard for subtrees/, the
+     pre-push guard for main; see subtrees/devenv_utils/WORKFLOW.md).
   2. Picks the persistent host directory bind-mounted at /workspace/mount.
   3. Verifies you can run `docker` without sudo, on a new enough daemon.
-  4. Provisions the machine-wide Gitea PR-review service and registers this
-     repo on it (see submodules/devenv_utils/GITEA.md).
-  5. Provisions the machine-wide gateway service that routes each project's
+  4. Provisions the GitHub token the dev container uses to push feature
+     branches and open PRs (see subtrees/devenv_utils/github_access.py).
+  5. Provisions the devenv_utils working clone under the mount (see
+     subtrees/devenv_utils/SUBTREES.md).
+  6. Provisions the machine-wide gateway service that routes each project's
      http://<project>-<service>.localhost dev URLs (see
-     submodules/devenv_utils/GATEWAY.md).
-  6. Writes a per-container VS Code config so that "Dev Containers: Attach
+     subtrees/devenv_utils/GATEWAY.md).
+  7. Writes a per-container VS Code config so that "Dev Containers: Attach
      to Running Container" connects as devuser instead of root.
-  7. Pre-trusts the container workspace paths in the host Claude Code config.
-  8. Builds the Docker image.
+  8. Pre-trusts the container workspace paths in the host Claude Code config.
+  9. Builds the Docker image.
 
-The generic steps live in `submodules/devenv_utils`; project-specific steps
+The generic steps live in `subtrees/devenv_utils`; project-specific steps
 belong on the SetupWizard subclass below.
 
 Re-run the wizard any time you want to refresh the VS Code attach config or
@@ -164,7 +155,7 @@ import os
 import sys
 
 from setup_common import make_config
-from submodules.devenv_utils import (
+from subtrees.devenv_utils import (
     SetupException,
     SetupWizardTool,
     in_docker_container,
@@ -213,7 +204,9 @@ def main():
         tool.rule()
         tool.validate_docker_version()
         tool.rule()
-        tool.setup_gitea_service()
+        tool.setup_github_access()
+        tool.rule()
+        tool.setup_devenv_clone()
         tool.rule()
         tool.setup_gateway_service()
         tool.rule()
@@ -248,7 +241,7 @@ if __name__ == "__main__":
 """Build the local Docker image from docker-setup/ (devenv.toml docker_context)."""
 
 from setup_common import check_setup_version, make_config
-from submodules.devenv_utils import docker_build
+from subtrees.devenv_utils import docker_build
 
 
 def main():
@@ -265,19 +258,19 @@ if __name__ == "__main__":
 
 All launch machinery (repo bind-mount, the persistent /workspace/mount host
 directory, UID/GID mapping, service wiring, exec-into-running) lives in
-submodules/devenv_utils, driven by the repo-root devenv.toml. Drops you into
+subtrees/devenv_utils, driven by the repo-root devenv.toml. Drops you into
 a bash shell inside the container as `devuser`, whose UID/GID match your host
 user, so files written into the bind-mounts are owned by you on the host.
 
 Each service in devenv.toml's [services] table is reached through the gateway
 at http://<project>-<service>.localhost; the launcher prints the service -> URL
-table (see submodules/devenv_utils/GATEWAY.md). Document here anything
+table (see subtrees/devenv_utils/GATEWAY.md). Document here anything
 project-specific about the mounts and services (what the persistent mount holds,
 what each service is).
 """
 
 from setup_common import check_setup_version, make_config
-from submodules.devenv_utils import docker_launch
+from subtrees.devenv_utils import docker_launch
 
 
 def main():
@@ -318,9 +311,9 @@ def main() -> int:
     print("     (crib from an existing consumer).")
     print("  3. Add any project-specific steps to setup_wizard.py's SetupWizard")
     print("     class, then run ./setup_wizard.py.")
-    print("  4. Point your CLAUDE.md at submodules/devenv_utils/SUBMODULES.md")
-    print("     (a short 'Git submodules' section with a link suffices).")
-    print("  5. Commit. See submodules/devenv_utils/CONSUMER_SETUP.md for details.")
+    print("  4. Point your CLAUDE.md at subtrees/devenv_utils/WORKFLOW.md and")
+    print("     SUBTREES.md (a short workflow section with links suffices).")
+    print("  5. Commit. See subtrees/devenv_utils/CONSUMER_SETUP.md for details.")
     return 0
 
 
