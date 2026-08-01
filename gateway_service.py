@@ -49,6 +49,7 @@ from .docker_ops import (
     build_image,
     container_exists,
     container_label,
+    docker,
     image_id,
     is_container_running,
     running_containers_with_env,

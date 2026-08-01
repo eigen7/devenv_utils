@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import github_access
 from .config import DevenvConfig
 from .console import SetupException, print_green, print_red, print_rule, yes_no
 from .docker_ops import (
@@ -22,7 +23,6 @@ from .docker_ops import (
     is_version_ok,
     major_version,
 )
-from . import github_access
 from .gateway_service import wizard_setup as gateway_wizard_setup
 from .nvidia import setup_cdi, validate_nvidia_driver, validate_nvidia_installation
 from .state import get_env_json, is_subpath, update_env_json

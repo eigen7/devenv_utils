@@ -9,7 +9,7 @@ the primitives in `docker_ops`.
 import argparse
 import os
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from . import gateway_service, github_access
 from .config import DevenvConfig
@@ -25,13 +25,14 @@ from .state import get_env_json, in_docker_container, is_subpath
 
 def docker_build(config: DevenvConfig):
     """Build the project's local Docker image. Entry point for build scripts."""
-    assert not in_docker_container(), \
+    assert not in_docker_container(), (
         "the image build must run on the host, not inside the container."
-    parser = argparse.ArgumentParser(
-        description=f"Build the local {config.name} Docker image."
     )
+    parser = argparse.ArgumentParser(description=f"Build the local {config.name} Docker image.")
     parser.add_argument(
-        "-l", "--local-docker-image", default=config.image,
+        "-l",
+        "--local-docker-image",
+        default=config.image,
         help="local image tag (default: %(default)s)",
     )
     args = parser.parse_args()
@@ -46,8 +47,8 @@ def docker_build(config: DevenvConfig):
 def docker_launch(
     config: DevenvConfig,
     *,
-    extend_parser: Optional[Callable[[argparse.ArgumentParser], None]] = None,
-    pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
+    extend_parser: Callable[[argparse.ArgumentParser], None] | None = None,
+    pre_launch: Callable[[argparse.Namespace], list] | None = None,
 ):
     """Launch (or attach to) the project's dev container. Entry point for run scripts.
 
@@ -68,10 +69,13 @@ def docker_launch(
     parser = argparse.ArgumentParser(
         description=f"Launch (or attach to) the {config.name} dev container."
     )
-    parser.add_argument("-d", "--docker-image",
-                        help=f"image to run (default: {config.image})")
-    parser.add_argument("-i", "--instance-name", default=config.instance_name,
-                        help="container name (default: %(default)s)")
+    parser.add_argument("-d", "--docker-image", help=f"image to run (default: {config.image})")
+    parser.add_argument(
+        "-i",
+        "--instance-name",
+        default=config.instance_name,
+        help="container name (default: %(default)s)",
+    )
     if extend_parser is not None:
         extend_parser(parser)
     args = parser.parse_args()
@@ -111,7 +115,7 @@ def _launch_fresh(
     config: DevenvConfig,
     args: argparse.Namespace,
     env: dict,
-    pre_launch: Optional[Callable[[argparse.Namespace], list]] = None,
+    pre_launch: Callable[[argparse.Namespace], list] | None = None,
 ):
     image = args.docker_image or env.get("DOCKER_IMAGE") or config.image
 
@@ -124,8 +128,9 @@ def _launch_fresh(
         if not os.path.isdir(mount_dir):
             print(f"Error: mount dir {mount_dir} does not exist. Re-run ./setup_wizard.py.")
             sys.exit(1)
-        assert not is_subpath(mount_dir, config.repo_root), \
+        assert not is_subpath(mount_dir, config.repo_root), (
             f"Mount dir {mount_dir} must not live inside repo {config.repo_root}"
+        )
 
     extra_args = pre_launch(args) if pre_launch is not None else []
 
@@ -143,6 +148,9 @@ def _launch_fresh(
     _print_service_urls(config, host_network)
 
     run_container(
-        config, image=image, instance_name=args.instance_name,
-        mount_dir=mount_dir, extra_args=extra_args,
+        config,
+        image=image,
+        instance_name=args.instance_name,
+        mount_dir=mount_dir,
+        extra_args=extra_args,
     )

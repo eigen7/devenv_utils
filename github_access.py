@@ -46,7 +46,7 @@ def read_token() -> str:
             f"No GitHub token at {path}.\n"
             "Run ./setup_wizard.py on the host (the setup_github_access step), then\n"
             "relaunch the container so the token mount picks it up."
-        )
+        ) from None
 
 
 def api(method: str, path: str, body: dict | None = None):
@@ -72,9 +72,9 @@ def api(method: str, path: str, body: dict | None = None):
             return json.load(response)
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
-        raise SetupException(f"GitHub API {method} {path} failed ({e.code}):\n{detail}")
+        raise SetupException(f"GitHub API {method} {path} failed ({e.code}):\n{detail}") from None
     except urllib.error.URLError as e:
-        raise SetupException(f"Could not reach {API_BASE}: {e.reason}")
+        raise SetupException(f"Could not reach {API_BASE}: {e.reason}") from None
 
 
 def origin_repo(repo_root: Path) -> str:
@@ -113,9 +113,7 @@ def dev_container_args() -> list[str]:
     provisions the token before the first launch, so its absence means an
     incomplete setup."""
     if not HOST_TOKEN_PATH.exists():
-        raise SetupException(
-            f"No GitHub token at {HOST_TOKEN_PATH}. Run ./setup_wizard.py first."
-        )
+        raise SetupException(f"No GitHub token at {HOST_TOKEN_PATH}. Run ./setup_wizard.py first.")
     return ["-v", f"{HOST_TOKEN_PATH}:{CONTAINER_TOKEN_PATH}:ro"]
 
 
