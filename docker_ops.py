@@ -62,7 +62,9 @@ def docker_server_version() -> str:
     """The Docker daemon's version (e.g. "28.3.3"), or "" if unavailable."""
     result = subprocess.run(
         ["docker", "version", "--format", "{{.Server.Version}}"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
     )
     if result.returncode != 0:
         return ""
@@ -70,10 +72,14 @@ def docker_server_version() -> str:
 
 
 def image_exists(image: str) -> bool:
-    return subprocess.run(
-        ["docker", "image", "inspect", image],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ).returncode == 0
+    return (
+        subprocess.run(
+            ["docker", "image", "inspect", image],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
 
 
 # ---- Inspection --------------------------------------------------------
@@ -130,6 +136,7 @@ def running_containers_with_env(var_name_prefix: str) -> list[str]:
 
 
 # ---- Build -------------------------------------------------------------
+
 
 def _copy_into(src: Path, dst: Path):
     """Copy the *contents* of directory `src` into existing directory `dst`."""
@@ -192,7 +199,9 @@ def gpu_docker_args() -> list:
 def is_container_running(name: str) -> bool:
     result = subprocess.run(
         ["docker", "inspect", "--format={{.State.Running}}", name],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
@@ -257,11 +266,16 @@ def _convenience_mounts() -> list:
     ssh_dir.mkdir(parents=True, exist_ok=True)
     ssh_dir.chmod(0o700)  # ssh refuses group/world-accessible key material
     return [
-        "-v", f"{claude_dir}:/workspace/.home-dir-soft-links/.claude",
-        "-v", f"{claude_json}:/workspace/.home-dir-soft-links/.claude.json",
-        "-v", f"{gitconfig}:/workspace/.home-dir-soft-links/.gitconfig",
-        "-v", f"{vscode_server}:/workspace/.home-dir-soft-links/.vscode_server",
-        "-v", f"{ssh_dir}:/workspace/.home-dir-soft-links/.ssh",
+        "-v",
+        f"{claude_dir}:/workspace/.home-dir-soft-links/.claude",
+        "-v",
+        f"{claude_json}:/workspace/.home-dir-soft-links/.claude.json",
+        "-v",
+        f"{gitconfig}:/workspace/.home-dir-soft-links/.gitconfig",
+        "-v",
+        f"{vscode_server}:/workspace/.home-dir-soft-links/.vscode_server",
+        "-v",
+        f"{ssh_dir}:/workspace/.home-dir-soft-links/.ssh",
     ]
 
 
@@ -285,17 +299,31 @@ def run_container(
     uid = subprocess.check_output(["id", "-u"], text=True).strip()
     gid = subprocess.check_output(["id", "-g"], text=True).strip()
 
-    cmd = [
-        "docker", "run", "--rm", "-it",
-    ] + gpu_docker_args() + [
-        "--name", instance_name,
-        "--hostname", config.container_hostname,
-        "-e", f"HOST_UID={uid}",
-        "-e", f"HOST_GID={gid}",
-        "-e", f"USERNAME={config.remote_user}",
-        "-e", f"DEVENV_WORKSPACE={config.container_repo_path}",
-        "-v", f"{config.repo_root}:{config.container_repo_path}",
-    ]
+    cmd = (
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-it",
+        ]
+        + gpu_docker_args()
+        + [
+            "--name",
+            instance_name,
+            "--hostname",
+            config.container_hostname,
+            "-e",
+            f"HOST_UID={uid}",
+            "-e",
+            f"HOST_GID={gid}",
+            "-e",
+            f"USERNAME={config.remote_user}",
+            "-e",
+            f"DEVENV_WORKSPACE={config.container_repo_path}",
+            "-v",
+            f"{config.repo_root}:{config.container_repo_path}",
+        ]
+    )
     if config.container_mount_path is not None:
         assert mount_dir, "mount_dir required when config has a mount path"
         cmd += ["-v", f"{mount_dir}:{config.container_mount_path}"]

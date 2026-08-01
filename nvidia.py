@@ -25,11 +25,16 @@ from .docker_ops import (
 def host_driver_version() -> str:
     """The host NVIDIA driver version, or "" if unavailable."""
     try:
-        return subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=driver_version",
-             "--format=csv,noheader"],
-            text=True, stderr=subprocess.DEVNULL,
-        ).strip().splitlines()[0].strip()
+        return (
+            subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .splitlines()[0]
+            .strip()
+        )
     except (subprocess.CalledProcessError, FileNotFoundError, IndexError):
         return ""
 
@@ -70,8 +75,7 @@ def setup_cdi():
     spec_exists = cdi_spec_exists()
     spec_driver = cdi_spec_driver_version() if spec_exists else ""
     if spec_exists and spec_driver == driver:
-        print_green(f"CDI spec {CDI_SPEC_PATH} is present and matches "
-                    f"driver {driver}.")
+        print_green(f"CDI spec {CDI_SPEC_PATH} is present and matches driver {driver}.")
         return
 
     print("GPU access mode: with the legacy `--gpus all` hook, suspend/resume or")
@@ -88,8 +92,10 @@ def setup_cdi():
         print(f"No CDI spec found at {CDI_SPEC_PATH}.")
 
     if not _have_nvidia_ctk():
-        print_red("nvidia-ctk not found; install/update the NVIDIA Container "
-                  "Toolkit (>= 1.12) to use CDI.")
+        print_red(
+            "nvidia-ctk not found; install/update the NVIDIA Container "
+            "Toolkit (>= 1.12) to use CDI."
+        )
         print("Falling back to `--gpus all` (with the suspend-bug caveat).")
         return
 
@@ -99,24 +105,31 @@ def setup_cdi():
         return
 
     result = subprocess.run(
-        ["sudo", "nvidia-ctk", "cdi", "generate",
-         f"--output={CDI_SPEC_PATH}"],
-        stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True,
+        ["sudo", "nvidia-ctk", "cdi", "generate", f"--output={CDI_SPEC_PATH}"],
+        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        text=True,
     )
     if result.returncode != 0 or not cdi_spec_exists():
         print_red("CDI spec generation failed:")
         print(result.stderr)
         print("Falling back to `--gpus all` (with the suspend-bug caveat).")
         return
-    print_green(f"Wrote {CDI_SPEC_PATH} (driver {driver}). Containers launched "
-                "from now on are immune to the suspend GPU-loss bug.")
+    print_green(
+        f"Wrote {CDI_SPEC_PATH} (driver {driver}). Containers launched "
+        "from now on are immune to the suspend GPU-loss bug."
+    )
 
 
 def _have_nvidia_ctk() -> bool:
-    return subprocess.run(
-        ["nvidia-ctk", "--version"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ).returncode == 0
+    return (
+        subprocess.run(
+            ["nvidia-ctk", "--version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
 
 
 def validate_nvidia_driver():
@@ -150,7 +163,9 @@ def validate_nvidia_installation(image: str):
         return
     result = subprocess.run(
         ["docker", "run", "--rm"] + gpu_args + [image, "nvidia-smi"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     if result.returncode == 0:
         print_green(f"GPU is accessible in Docker (mode: {mode}).")
@@ -161,8 +176,9 @@ def validate_nvidia_installation(image: str):
     print_red("NVIDIA Container Toolkit validation failed:")
     print(result.stderr)
     print("Install/configure the NVIDIA Container Toolkit:")
-    print("  https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/"
-          "latest/install-guide.html")
-    print("Likely applicable sections: 'Installing with Apt' and "
-          "'Configuring Docker'.")
+    print(
+        "  https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/"
+        "latest/install-guide.html"
+    )
+    print("Likely applicable sections: 'Installing with Apt' and 'Configuring Docker'.")
     raise SetupException()
