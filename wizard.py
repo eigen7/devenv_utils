@@ -78,11 +78,13 @@ class SetupWizardTool:
     # hook name -> ordered (devenv_utils script, extra args) entries, run in
     # sequence; a failing entry aborts the hook and skips the rest.
     # subtree_guard.py blocks direct edits to the read-only vendored subtrees;
-    # prepush_guard.py keeps in-container pushes off origin's main (see each
-    # script's docstring).
+    # prepush_guard.py keeps in-container pushes off origin's main;
+    # rebase_guard.py refuses rebases that would replay subtree commits (see
+    # each script's docstring).
     GIT_HOOKS = {
         "pre-push": [("prepush_guard.py", ' "$@"')],
         "pre-commit": [("subtree_guard.py", "")],
+        "pre-rebase": [("rebase_guard.py", ' "$@"')],
     }
 
     # Hook names an earlier revision of the workflow installed; removed on
