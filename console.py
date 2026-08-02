@@ -23,8 +23,11 @@ def print_rule():
     print(RULE)
 
 
-def yes_no(prompt: str, default_yes: bool = True) -> bool:
-    suffix = " [Y/n]: " if default_yes else " [y/N]: "
+def yes_no(prompt: str, default_yes: bool = True, explanation: str | None = None) -> bool:
+    """Ask a yes/no question. With `explanation`, '?' becomes a third choice
+    that prints it and asks again."""
+    letters = "Y/n" if default_yes else "y/N"
+    suffix = f" [{letters}/?]: " if explanation else f" [{letters}]: "
     while True:
         ans = input(prompt + suffix).strip().lower()
         if not ans:
@@ -33,3 +36,5 @@ def yes_no(prompt: str, default_yes: bool = True) -> bool:
             return True
         if ans in ("n", "no"):
             return False
+        if ans == "?" and explanation:
+            print(explanation)

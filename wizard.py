@@ -8,11 +8,14 @@ directory) is held on the instance.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import ClassVar
+
+import tomllib
 
 from . import github_access
 from .config import DevenvConfig
@@ -327,6 +330,88 @@ class SetupWizardTool:
             return
 
         print_green("Configured Claude workspace trust for /workspace and /workspace/repo.")
+
+    # ---- Step: codex auth store ----------------------------------------
+
+    CODEX_STORE_EXPLANATION: ClassVar[str] = (
+        'Codex\'s default credential store ("auto") prefers the OS keyring, so\n'
+        "a host-side `codex login` leaves nothing in ~/.codex for docker_ops\n"
+        "to mount into containers, and codex inside them asks to log in\n"
+        'again. With cli_auth_credentials_store = "file" in\n'
+        "~/.codex/config.toml, login writes ~/.codex/auth.json instead, and\n"
+        "one host login authenticates every container. The tokens then live\n"
+        "on disk rather than in the keyring, and the current keyring-held\n"
+        "login must be redone (`codex login`)."
+    )
+
+    CODEX_SKIP_EXPLANATION: ClassVar[str] = (
+        "Records CODEX_AUTH_STORE_DECLINED in .env.json so the wizard stops\n"
+        "suggesting this. Delete that entry to be asked again."
+    )
+
+    def setup_codex_auth_store(self):
+        """Steer an installed codex CLI toward file-based auth credentials.
+
+        The ~/.codex convenience mount (docker_ops._convenience_mounts) only
+        delivers credentials that exist as ~/.codex/auth.json; the keyring the
+        default store prefers is invisible to containers. Detect the pitfall,
+        offer the config fix, and remember a declined offer in .env.json.
+        Detection is by `codex` on PATH — ~/.codex existing proves nothing,
+        since the mount machinery creates it on every host.
+        """
+        if shutil.which("codex") is None:
+            return
+        codex_home = Path.home() / ".codex"
+        config_path = codex_home / "config.toml"
+        if self._codex_uses_file_store(config_path):
+            print_green("Codex is set to file-based auth credentials.")
+            return
+        if get_env_json(self.config.env_json_path).get("CODEX_AUTH_STORE_DECLINED"):
+            return
+        if yes_no(
+            "Codex installation detected. Switch to file-based auth "
+            "credentials (codex re-login required)?",
+            explanation=self.CODEX_STORE_EXPLANATION,
+        ):
+            self._write_codex_file_store(config_path)
+            print_green(f'Set cli_auth_credentials_store = "file" in {config_path}.')
+            print("Run `codex login` on the host to write ~/.codex/auth.json.")
+            return
+        if yes_no(
+            "Save this response to skip this suggestion on next run?",
+            explanation=self.CODEX_SKIP_EXPLANATION,
+        ):
+            update_env_json(self.config.env_json_path, {"CODEX_AUTH_STORE_DECLINED": True})
+            print(f"Saved. Edit {self.config.env_json_path} manually if you change your mind.")
+
+    @staticmethod
+    def _codex_uses_file_store(config_path: Path) -> bool:
+        if not config_path.is_file():
+            return False
+        with config_path.open("rb") as f:
+            settings = tomllib.load(f)
+        return settings.get("cli_auth_credentials_store") == "file"
+
+    @staticmethod
+    def _write_codex_file_store(config_path: Path):
+        """Set cli_auth_credentials_store = "file" in `config_path`, replacing
+        an existing assignment or appending a commented one."""
+        addition = (
+            "# Store login credentials in ~/.codex/auth.json rather than the OS\n"
+            "# keyring, so devenv containers (which bind-mount this dir and have\n"
+            "# no keyring) share the host's login.\n"
+            'cli_auth_credentials_store = "file"\n'
+        )
+        text = config_path.read_text() if config_path.is_file() else ""
+        pattern = r"(?m)^\s*cli_auth_credentials_store\s*=.*$"
+        if re.search(pattern, text):
+            text = re.sub(pattern, 'cli_auth_credentials_store = "file"', text)
+        else:
+            if text:
+                text = text.rstrip("\n") + "\n\n"
+            text += addition
+        config_path.parent.mkdir(exist_ok=True)
+        config_path.write_text(text)
 
     # ---- Step: build image ---------------------------------------------
 
