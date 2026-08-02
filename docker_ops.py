@@ -238,8 +238,11 @@ def _convenience_mounts() -> list:
     """
     claude_dir = Path.home() / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
-    # Codex CLI credentials (host-side `codex login`), so the plan-review
-    # skill's cross-vendor seat is authenticated inside containers.
+    # Codex CLI credentials, so the plan-review skill's cross-vendor seat is
+    # authenticated inside containers. Requires ~/.codex/config.toml to set
+    # cli_auth_credentials_store = "file": the default ("auto") stores a
+    # host-side `codex login` in the OS keyring, which containers can't see,
+    # and only the file store puts auth.json in this dir.
     codex_dir = Path.home() / ".codex"
     codex_dir.mkdir(parents=True, exist_ok=True)
     # touch() prevents Docker from pre-creating these as root-owned
