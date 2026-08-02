@@ -35,8 +35,9 @@ training-induced blind spots and architectural tastes even under disjoint
 lens prompts; a different vendor's model decorrelates them, and it also
 checks the structural bias of a Claude orchestrator adjudicating critiques
 of a Claude-authored plan. When the `codex` CLI is on PATH and authenticated
-(host-side `codex login`, credentials mounted into the container), run the
-rival-designer seat as:
+(host-side `codex login` with `cli_auth_credentials_store = "file"` in
+`~/.codex/config.toml` — the keyring default is invisible to containers —
+and the dir mounted in), run the rival-designer seat as:
 
     codex exec --sandbox read-only "<the panelist prompt>"
 
