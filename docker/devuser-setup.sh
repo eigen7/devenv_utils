@@ -41,6 +41,9 @@ fi
 if [ -e /workspace/.home-dir-soft-links/.claude.json ]; then
   ln -snf /workspace/.home-dir-soft-links/.claude.json ~/.claude.json
 fi
+if [ -e /workspace/.home-dir-soft-links/.codex ]; then
+  ln -snf /workspace/.home-dir-soft-links/.codex ~/.codex
+fi
 if [ -e /workspace/.home-dir-soft-links/.gitconfig ]; then
   ln -snf /workspace/.home-dir-soft-links/.gitconfig ~/.gitconfig
 fi

@@ -237,6 +237,10 @@ def _convenience_mounts() -> list:
     """
     claude_dir = Path.home() / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
+    # Codex CLI credentials (host-side `codex login`), so the plan-review
+    # skill's cross-vendor seat is authenticated inside containers.
+    codex_dir = Path.home() / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
     # touch() prevents Docker from pre-creating these as root-owned
     # files/directories if they're missing on the host.
     claude_json = Path.home() / ".claude.json"
@@ -268,6 +272,8 @@ def _convenience_mounts() -> list:
     return [
         "-v",
         f"{claude_dir}:/workspace/.home-dir-soft-links/.claude",
+        "-v",
+        f"{codex_dir}:/workspace/.home-dir-soft-links/.codex",
         "-v",
         f"{claude_json}:/workspace/.home-dir-soft-links/.claude.json",
         "-v",
