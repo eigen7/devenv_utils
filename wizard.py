@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 from . import github_access
 from .config import DevenvConfig
@@ -81,7 +82,7 @@ class SetupWizardTool:
     # prepush_guard.py keeps in-container pushes off origin's main;
     # rebase_guard.py refuses rebases that would replay subtree commits (see
     # each script's docstring).
-    GIT_HOOKS = {
+    GIT_HOOKS: ClassVar[dict] = {
         "pre-push": [("prepush_guard.py", ' "$@"')],
         "pre-commit": [("subtree_guard.py", "")],
         "pre-rebase": [("rebase_guard.py", ' "$@"')],
@@ -182,6 +183,7 @@ class SetupWizardTool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            check=False,
         )
         if result.returncode == 0:
             print_green("Docker is usable without sudo.")
