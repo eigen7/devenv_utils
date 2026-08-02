@@ -359,8 +359,23 @@ class SetupWizardTool:
         offer the config fix, and remember a declined offer in .env.json.
         Detection is by `codex` on PATH — ~/.codex existing proves nothing,
         since the mount machinery creates it on every host.
+
+        A snap-installed codex is warned about instead of configured: snap
+        confinement gives it its own home, so neither the real
+        ~/.codex/config.toml nor any host login it performs ever reaches the
+        directory the containers mount.
         """
-        if shutil.which("codex") is None:
+        codex_bin = shutil.which("codex")
+        if codex_bin is None:
+            return
+        if codex_bin.startswith("/snap/"):
+            print_red(f"Codex is installed as a snap ({codex_bin}).")
+            print("Snap confinement keeps its config and credentials in its own")
+            print("home (~/snap/...), which never reaches ~/.codex — so a host")
+            print("`codex login` cannot authenticate devenv containers. Either")
+            print("reinstall it unconfined (npm install -g @openai/codex) and")
+            print("re-run this wizard, or log in inside any container instead:")
+            print("    codex login --device-auth")
             return
         codex_home = Path.home() / ".codex"
         config_path = codex_home / "config.toml"
