@@ -35,8 +35,8 @@ PRs; a pre-push hook keeps it off `main`, which only advances by your merges.
 ## The development workflow, from your side
 
 The first time, you run `./setup_wizard.py`. This walks you through one-time
-setup — including the GitHub token the container will use — and builds the
-Docker image.
+setup — including the GitHub token the container will use, skippable if you
+only want to build and run the project — and builds the Docker image.
 
 After that, you start a development session by running `./run_docker.py`. This
 launches a Docker container and lands you inside of it, like an ssh session

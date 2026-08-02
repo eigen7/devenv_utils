@@ -132,7 +132,7 @@ Run this *outside* the Docker container. It:
   2. Picks the persistent host directory bind-mounted at /workspace/mount.
   3. Verifies you can run `docker` without sudo, on a new enough daemon.
   4. Provisions the GitHub token the dev container uses to push feature
-     branches and open PRs (see subtrees/devenv_utils/github_access.py).
+     branches and open PRs (optional; see subtrees/devenv_utils/github_access.py).
   5. Provisions the devenv_utils working clone under the mount (see
      subtrees/devenv_utils/SUBTREES.md).
   6. Provisions the machine-wide gateway service that routes each project's
