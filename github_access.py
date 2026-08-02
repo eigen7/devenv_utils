@@ -7,6 +7,10 @@ container the entrypoint wires it into git (a credential helper for
 https://github.com) and into token-reading tools (GH_TOKEN), so pushing a
 branch and opening a PR need no further setup.
 
+The step is optional: a user who only builds and runs the project can skip it.
+The container then launches without the token mount, and the PR-workflow tools
+fail on their first token read with a pointer back to the wizard.
+
 The recommended token is a fine-grained personal access token of a dedicated
 machine account, granted Contents and Pull-requests read/write on only the
 repos this machine works on: the container can then push feature branches and
@@ -109,11 +113,11 @@ def open_pr(slug: str, *, head: str, base: str, title: str, body: str) -> dict:
 
 
 def dev_container_args() -> list[str]:
-    """`docker run` args mounting the token into a dev container. The wizard
-    provisions the token before the first launch, so its absence means an
-    incomplete setup."""
+    """`docker run` args mounting the token into a dev container, or none when
+    the optional wizard step was skipped -- the container still builds and
+    runs; only the PR workflow needs the token."""
     if not HOST_TOKEN_PATH.exists():
-        raise SetupException(f"No GitHub token at {HOST_TOKEN_PATH}. Run ./setup_wizard.py first.")
+        return []
     return ["-v", f"{HOST_TOKEN_PATH}:{CONTAINER_TOKEN_PATH}:ro"]
 
 
@@ -137,9 +141,11 @@ def _token_login(token: str) -> str | None:
 def wizard_setup(config: DevenvConfig):
     """Interactive provisioning of the GitHub token (wizard step body).
 
-    Re-runs are quiet when the stored token still authenticates; a missing or
-    revoked token prompts for a fresh one. Stored mode 600 -- it is a
-    credential, and the container mounts it read-only.
+    Optional: a blank entry skips it (and drops any stale stored token), for
+    users who build and run without the PR workflow; re-running the wizard
+    offers the prompt again. Re-runs are quiet when the stored token still
+    authenticates; a missing or revoked token prompts for a fresh one. Stored
+    mode 600 -- it is a credential, and the container mounts it read-only.
     """
     if HOST_TOKEN_PATH.exists():
         login = _token_login(HOST_TOKEN_PATH.read_text().strip())
@@ -153,10 +159,15 @@ def wizard_setup(config: DevenvConfig):
     print("Recommended: a fine-grained personal access token of a dedicated")
     print("machine account, granted Contents + Pull requests (read/write) on only")
     print(f"the repos this machine works on (at minimum: {origin_repo(config.repo_root)}).")
+    print("The token is only needed for that PR workflow: leave the prompt blank")
+    print("to skip it and just build and run. Re-run this wizard to add one later.")
     while True:
-        token = getpass.getpass("GitHub token (input hidden): ").strip()
+        token = getpass.getpass("GitHub token (blank to skip; input hidden): ").strip()
         if not token:
-            continue
+            HOST_TOKEN_PATH.unlink(missing_ok=True)
+            print("Skipped; no GitHub token stored. The container cannot push branches")
+            print("or open PRs until one is provisioned (re-run this wizard).")
+            return
         login = _token_login(token)
         if login is None:
             print_red("GitHub rejected that token; try again (Ctrl-C to abort setup).")

@@ -135,8 +135,9 @@ class SetupWizardTool:
 
     def setup_github_access(self):
         """Provision the GitHub token the dev container uses to push feature
-        branches and open PRs (see github_access.py). Quiet on re-runs while
-        the stored token still authenticates."""
+        branches and open PRs (see github_access.py). Optional -- skippable by
+        users who only build and run. Quiet on re-runs while the stored token
+        still authenticates."""
         github_access.wizard_setup(self.config)
 
     # ---- Step: devenv_utils working clone ------------------------------
