@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
 
 from .console import SetupException
 
@@ -25,7 +24,7 @@ SHARED_DOCKER_ASSETS = Path(__file__).resolve().parent / "docker"
 
 # ---- Version strings -----------------------------------------------------
 
-Version = Tuple[int, ...]
+Version = tuple[int, ...]
 
 
 def parse_version_str(version_str: str) -> Version:
@@ -65,6 +64,7 @@ def docker_server_version() -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         return ""
@@ -77,6 +77,7 @@ def image_exists(image: str) -> bool:
             ["docker", "image", "inspect", image],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            check=False,
         ).returncode
         == 0
     )
@@ -92,7 +93,7 @@ PROVISIONING_LABEL = "devenv.provisioning"
 
 def docker(*args: str) -> subprocess.CompletedProcess:
     """Run a docker command, capturing both streams for the caller to inspect."""
-    return subprocess.run(["docker", *args], capture_output=True, text=True)
+    return subprocess.run(["docker", *args], capture_output=True, text=True, check=False)
 
 
 def container_exists(name: str) -> bool:
@@ -147,7 +148,7 @@ def build_image(
     image: str,
     context_dir: Path,
     *,
-    assets_dir: Optional[Path] = None,
+    assets_dir: Path | None = None,
 ):
     """Build `image` from a staged context.
 
@@ -199,9 +200,9 @@ def gpu_docker_args() -> list:
 def is_container_running(name: str) -> bool:
     result = subprocess.run(
         ["docker", "inspect", "--format={{.State.Running}}", name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
+        check=False,
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
@@ -290,8 +291,8 @@ def run_container(
     *,
     image: str,
     instance_name: str,
-    mount_dir: Optional[str] = None,
-    extra_args: Optional[list] = None,
+    mount_dir: str | None = None,
+    extra_args: list | None = None,
 ):
     """`docker run` a fresh container for `config`, dropping into a shell.
 
