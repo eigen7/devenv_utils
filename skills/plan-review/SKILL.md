@@ -39,9 +39,23 @@ of a Claude-authored plan. When the `codex` CLI is on PATH and authenticated
 `~/.codex/config.toml` — the keyring default is invisible to containers —
 and the dir mounted in), run the rival-designer seat as:
 
-    codex exec --sandbox read-only "<the panelist prompt>"
+    codex exec --profile container "<the panelist prompt>"
 
 capturing stdout (codex prints the final message there, progress to stderr).
+
+The `container` profile must exist as `~/.codex/container.config.toml`
+containing `sandbox_mode = "danger-full-access"`, created by the user, not
+the agent. It exists because codex's own sandbox cannot start inside a
+devenv container — its bundled bubblewrap is denied namespace creation, so
+every sandboxed run fails at its first file read; the container itself is
+the isolation boundary, the exact case codex documents this mode for. If
+the profile is missing, do not substitute `--sandbox danger-full-access`
+or write the profile yourself — tell the user to create it, and for the
+current run keep `--sandbox read-only` but pipe everything the seat needs
+(lens file, plan text) via stdin, instructing the model to work entirely
+from the provided text and run no commands. That degraded seat cannot
+browse the repo; say so when reporting panel coverage.
+
 When codex is absent, that seat falls back to a session-tier subagent — the
 panel degrades gracefully to all-Claude.
 
