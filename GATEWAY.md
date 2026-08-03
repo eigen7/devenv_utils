@@ -90,6 +90,15 @@ traefik.http.routers.<project>-<service>.service=<project>-<service>
 traefik.http.services.<project>-<service>.loadbalancer.server.port=<port>
 ```
 
+and runs the container on the `devenv` network — the labels only *declare*
+the routes; the shared network is what lets Traefik reach the container.
+Membership is fixed at container creation and can rot afterwards: if the
+network is removed while the container is stopped (a `docker network prune`
+suffices) and later recreated, the container keeps its labels but every
+gateway URL times out. The launcher therefore reconnects a running,
+detached container each time it attaches; the manual equivalent is
+`docker network connect devenv <container>`.
+
 Traefik forwards matching requests over the `devenv` network to the
 container's port. WebSockets pass through transparently (Vite HMR included),
 so a dev server behind the gateway needs exactly two properties:
