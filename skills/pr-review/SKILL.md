@@ -27,26 +27,31 @@ invocation argument, defaulting to `standard`:
 | Profile    | Panel                   | Skeptics per finding | Rounds |
 |------------|-------------------------|----------------------|--------|
 | `light`    | correctness, clean-code | none                 | 1      |
-| `standard` | all four                | 1                    | 2      |
-| `thorough` | all four, session-tier  | 3, majority verdict  | 2      |
+| `standard` | all six                 | 1                    | 2      |
+| `thorough` | all six, session-tier   | 3, majority verdict  | 2      |
 
 ## Round 1: the panel
 
 Spawn one subagent per reviewer, all in parallel — skipping any reviewer
 whose dimension the diff plainly does not touch (a docs-only diff needs no
-correctness or tests pass; the summary says which reviewers were skipped).
-The judgment-call reviewers run on a cheaper model tier — a narrow rubric is
-what makes that work. Correctness runs on the session's own tier: it is the
-one dimension where model quality dominates the rubric, because the bugs
-that survive an authoring agent plus a passing test suite are the subtle
-kind. Under `thorough`, everything runs session-tier.
+correctness or tests pass; a diff off every hot path needs no performance
+pass; one touching no human-operated surface needs no ux pass — the summary
+says which reviewers were skipped). The judgment-call reviewers run on a
+cheaper model tier — a narrow rubric is what makes that work. Correctness
+and performance run on the session's own tier: these are the dimensions
+where model quality dominates the rubric — the bugs that survive an
+authoring agent plus a passing test suite are the subtle kind, and judging
+whether a mechanism truly wastes machine resources on a hot path is no
+shallower. Under `thorough`, everything runs session-tier.
 
 | Reviewer    | Rubric                     | Model   |
 |-------------|----------------------------|---------|
 | correctness | `reviewers/correctness.md` | session |
+| performance | `reviewers/performance.md` | session |
 | clean-code  | `reviewers/clean-code.md`  | sonnet  |
 | prose       | `reviewers/prose.md`       | sonnet  |
 | tests       | `reviewers/tests.md`       | sonnet  |
+| ux          | `reviewers/ux.md`          | sonnet  |
 
 Prompt template for each (fill the bracketed parts; rubric paths made
 absolute):
@@ -68,11 +73,12 @@ absolute):
 
 A reviewer told to find flaws will find flaws, even if it has to invent
 them; the skeptic is the filter that makes the panel's output trustworthy.
-A correctness finding demonstrated by execution — the probe and its observed
-output included in the finding — skips the pass entirely: demonstration
-beats refutation. For every other must-fix/should-fix finding from the
-**correctness** reviewer, spawn a skeptic subagent on the session's model
-tier (never a downgraded model — refutation is where quality pays):
+A finding demonstrated by execution — the probe or benchmark and its
+observed output included in the finding — skips the pass entirely:
+demonstration beats refutation. For every other must-fix/should-fix finding
+from the **correctness** or **performance** reviewers — both make
+falsifiable claims — spawn a skeptic subagent on the session's model tier
+(never a downgraded model — refutation is where quality pays):
 
 > A code reviewer claims the following about the repo at [path], review
 > range [base]..[HEAD]: [the finding, verbatim]. Attempt to REFUTE this claim by
@@ -83,7 +89,7 @@ tier (never a downgraded model — refutation is where quality pays):
 Discard REFUTED findings. CONFIRMED findings are the real work; PLAUSIBLE
 ones are addressed or rebutted like any other but can never be escalated as
 disputes. Under `thorough`, take the majority of three skeptics. Findings
-from the other three reviewers are judgment calls rather than falsifiable
+from the other four reviewers are judgment calls rather than falsifiable
 claims — accept or rebut them directly, no skeptic.
 
 ## Resolution
