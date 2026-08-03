@@ -18,8 +18,15 @@ Where to look:
 
 - The diff itself: off-by-ones, inverted conditions, unit and type
   mismatches, the wrong variable picked from similarly named ones.
-- Every caller of a changed function: does the change break an assumption
-  some call site relies on?
+- Removed behavior: for every line the diff deletes or replaces, name the
+  invariant or behavior it enforced, then find where the new code
+  re-establishes it. If nowhere — a dropped guard, a lost error path, a
+  narrowed validation — that is a candidate defect, not a refactor detail.
+- Every caller of a changed function (grep for the symbol; the diff won't
+  show them): does the change break a call site through a new precondition,
+  a changed return shape or error contract, or a changed ordering
+  assumption? And the reverse — does another change in the same PR make a
+  call the changed code performs unsafe?
 - Invariants: does the change maintain what the surrounding code documents
   or implicitly relies on (ordering, nullability, ownership, locking)?
 - Error and edge paths: empty inputs, boundary values, failure of a call the
