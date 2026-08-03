@@ -82,9 +82,13 @@ def docker_launch(
 
     if is_container_running(args.instance_name):
         print(f"Container {args.instance_name} already running; exec'ing in.")
-        # The container's network mode is fixed at its original launch, and the
-        # gateway routes are attached then too; here we only reprint the table.
-        _print_service_urls(config, "--network=host" in config.extra_docker_args)
+        # The container's routing labels are fixed at its original launch; the
+        # one piece of gateway wiring that can rot on a live container is
+        # devenv-network membership, so re-establish that before reprinting
+        # the table.
+        host_network = "--network=host" in config.extra_docker_args
+        gateway_service.ensure_running_container_attached(config, args.instance_name, host_network)
+        _print_service_urls(config, host_network)
         exec_into_running(args.instance_name, config.remote_user)
         return
 

@@ -175,10 +175,12 @@ def router_labels(project: str, service: str, port: int) -> list[str]:
 
 
 def container_args(project: str, services: dict[str, Service], http_port: int) -> list[str]:
-    """Every `docker run` arg attaching a dev container to the gateway: the
-    routing labels (traefik.enable once, then per service), a loopback `-p`
-    for each `publish` service, and a `DEVENV_SERVICE_URL_*` env per service."""
-    args = ["--label", "traefik.enable=true"]
+    """Every `docker run` arg attaching a dev container to the gateway:
+    membership in the devenv network (where Traefik reaches the container --
+    labels alone route nothing), the routing labels (traefik.enable once,
+    then per service), a loopback `-p` for each `publish` service, and a
+    `DEVENV_SERVICE_URL_*` env per service."""
+    args = ["--network", DEVENV_NETWORK, "--label", "traefik.enable=true"]
     for name, svc in services.items():
         args += _labels_to_args(_routing_labels(project, name, svc.port))
     for svc in services.values():
@@ -222,8 +224,41 @@ def dev_container_args(config: DevenvConfig, host_network: bool) -> list[str]:
     service = load_service_config()
     if service is None:
         raise SetupException(NOT_PROVISIONED_MESSAGE)
+    # The network can vanish after provisioning (a docker prune while nothing
+    # running was attached); recreate it before starting the gateway, which
+    # rejoins by name on start.
+    ensure_network()
     ensure_started()
     return container_args(config.name, config.services, service["http_port"])
+
+
+def ensure_running_container_attached(config: DevenvConfig, instance_name: str, host_network: bool):
+    """Heal a running dev container that has fallen off the devenv network.
+
+    Membership is established at container creation, so if the network is
+    removed while the container is stopped (a docker prune suffices) and later
+    recreated, the container keeps its routing labels but Traefik can no
+    longer reach it and every service URL times out. Reconnecting by name is
+    idempotent-cheap, so the launcher calls this on every attach."""
+    if not config.services or host_network:
+        return
+    listing = docker(
+        "container",
+        "inspect",
+        "--format={{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+        instance_name,
+    )
+    if listing.returncode != 0 or DEVENV_NETWORK in listing.stdout.split():
+        return
+    ensure_network()
+    result = docker("network", "connect", DEVENV_NETWORK, instance_name)
+    if result.returncode == 0:
+        print(f"Reattached {instance_name} to the '{DEVENV_NETWORK}' network.")
+    else:
+        print_red(
+            f"Could not attach {instance_name} to '{DEVENV_NETWORK}': {result.stderr.strip()}\n"
+            "Gateway URLs will time out until it is attached."
+        )
 
 
 def launch_urls(config: DevenvConfig, host_network: bool) -> dict[str, str]:
