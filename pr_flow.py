@@ -62,7 +62,7 @@ import subprocess
 from .config import DevenvConfig, load_config
 from .console import SetupException
 from .github_access import api, find_open_pr, open_pr, origin_repo
-from .stale_worktrees import print_stale_report
+from .stale_worktrees import changed_files, print_stale_report
 from .worktrees import primary_worktree, secondary_worktrees, worktree_for_branch
 
 CLAUDE_NAME = "Claude"
@@ -96,19 +96,6 @@ def copy_setup_state(main: Path, cfg: DevenvConfig, worktree: Path):
         shutil.copy2(main / rel, worktree / rel)
 
 
-def is_ancestor(repo: Path, maybe_ancestor: str, of: str) -> bool:
-    """Whether `maybe_ancestor` is an ancestor of `of` in `repo`. A commit git
-    cannot resolve (absent from the checkout) counts as not-an-ancestor."""
-    return (
-        subprocess.run(
-            ["git", "merge-base", "--is-ancestor", maybe_ancestor, of],
-            cwd=repo,
-            capture_output=True,
-        ).returncode
-        == 0
-    )
-
-
 def branch_adds_commits(main: Path, branch: str, base: str = "main") -> bool:
     """Whether `branch` carries commits `base` lacks."""
     return bool(git_out(main, "rev-list", f"{base}..{branch}"))
@@ -116,7 +103,7 @@ def branch_adds_commits(main: Path, branch: str, base: str = "main") -> bool:
 
 def local_branch_exists(main: Path, branch: str) -> bool:
     result = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main, check=False
     )
     return result.returncode == 0
 
@@ -129,7 +116,7 @@ def delete_local_branch(main: Path, branch: str, *, force: bool):
     """
     flag = "-D" if force else "-d"
     result = subprocess.run(
-        ["git", "branch", flag, branch], cwd=main, capture_output=True, text=True
+        ["git", "branch", flag, branch], cwd=main, capture_output=True, text=True, check=False
     )
     if result.returncode and "not found" not in result.stderr:
         raise subprocess.CalledProcessError(
@@ -194,13 +181,16 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     print_stale_report(cfg)
 
 
-def branch_pr_merged(slug: str, main: Path, branch: str) -> bool:
-    """Whether `branch` has landed in origin's main: an ancestry check first
-    (free, and covers merge commits), then GitHub's merged flag, which also
-    recognizes squash and rebase merges -- their rewritten commits defeat the
-    ancestry test."""
-    if is_ancestor(main, branch, "refs/remotes/origin/main"):
-        return True
+def branch_pr_merged(slug: str, branch: str) -> bool:
+    """Whether `branch`'s PR has merged into origin's main, per GitHub's
+    merged flag (which also recognizes squash and rebase merges).
+
+    Ancestry is deliberately not consulted: reachability from origin/main is
+    equivalent to "the branch has no commits of its own", which is just as
+    true of a freshly prepared worktree whose work is still uncommitted --
+    the case that must never read as merged. Work landed without a PR (e.g.
+    pushed to main from the host) therefore leaves its worktree behind;
+    `abandon` covers that, and a lingering worktree beats a destroyed one."""
     owner = slug.split("/")[0]
     prs = api("GET", f"/repos/{slug}/pulls?state=closed&head={owner}:{branch}")
     return any(pr.get("merged_at") for pr in prs)
@@ -215,7 +205,12 @@ def cmd_cleanup(cfg: DevenvConfig, args: argparse.Namespace):
     for entry in secondary_worktrees(main):
         if entry.branch is None or not local_branch_exists(main, entry.branch):
             continue
-        if not branch_pr_merged(slug, main, entry.branch):
+        if not branch_pr_merged(slug, entry.branch):
+            continue
+        if changed_files(entry.path):
+            # Removal would discard the uncommitted changes; leave the
+            # worktree for the user (`abandon` once they've salvaged them).
+            print(f"Skipping {entry.branch}: PR merged, but the worktree has uncommitted changes.")
             continue
         teardown_branch(main, entry.branch, force=True)
         print(f"Removed merged worktree + branch: {entry.branch}")
