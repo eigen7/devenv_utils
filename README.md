@@ -54,8 +54,9 @@ stays mostly invisible. A typical change:
    branch also exists locally, so `git checkout <branch>` shows you the code
    in your own IDE.)
 3. When it looks good, **merge it on GitHub**.
-4. `git pull` when convenient. `pr_flow.py cleanup` (host or container)
-   removes the worktrees and local branches of merged PRs.
+4. `git pull` when convenient. Nothing else: the agent removes merged
+   worktrees and their branches itself (`pr_flow.py cleanup`, run in the
+   container, where the worktree paths exist).
 
 Committing directly on `main` needs no ceremony: commit and push from the
 host, as in any repo.
