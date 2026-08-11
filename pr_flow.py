@@ -19,7 +19,9 @@ commands:
 
   pr_flow.py cleanup
       Remove the worktrees and local branches of every branch whose PR has
-      merged. The post-merge counterpart to `worktree`.
+      merged. The post-merge counterpart to `worktree`; the agent runs it
+      routinely, and it must run where the worktree paths exist (normally
+      the dev container -- a host-side run skips them).
 
   pr_flow.py abandon <branch>
       Tear down a worktree and delete its (possibly unmerged) branch, without
@@ -155,10 +157,11 @@ def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
 
 
 def print_handoff(url: str):
+    # Deliberately no post-merge instructions: removing merged worktrees is
+    # the agent's routine duty (WORKFLOW.md), never something to ask of the
+    # user.
     print("\nReview + merge on GitHub:")
     print(f"  {url}")
-    print("After the merge, `git pull` on main and run `pr_flow.py cleanup` to")
-    print("remove the merged worktree.")
 
 
 def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
@@ -206,6 +209,14 @@ def cmd_cleanup(cfg: DevenvConfig, args: argparse.Namespace):
         if entry.branch is None or not local_branch_exists(main, entry.branch):
             continue
         if not branch_pr_merged(slug, entry.branch):
+            continue
+        if not entry.path.is_dir():
+            # Worktree paths are absolute in the environment that created them
+            # -- normally the dev container -- so a host-side run may not see
+            # them at all, and their uncommitted state can't be inspected from
+            # here. Leave them for a run where the path exists.
+            print(f"Skipping {entry.branch}: worktree {entry.path} is not visible here;")
+            print("run cleanup where it was created (normally the dev container).")
             continue
         if changed_files(entry.path):
             # Removal would discard the uncommitted changes; leave the

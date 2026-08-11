@@ -99,6 +99,11 @@ def find_stale_worktrees(repo_root: Path, stale_days: float) -> list[StaleWorktr
     cutoff = time.time() - stale_days * 86400
     stale = []
     for worktree in secondary_worktrees(repo_root):
+        if not worktree.path.is_dir():
+            # Not visible from this environment (container-created paths on a
+            # host-side run -- see pr_flow.cmd_cleanup); nothing about its
+            # activity can be read, so it can't be reported on.
+            continue
         changed = changed_files(worktree.path)
         activity = last_activity(worktree.path, changed)
         if activity < cutoff:

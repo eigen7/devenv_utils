@@ -47,9 +47,12 @@ devenv_utils working clone; run it from the repo the change targets.
    A plain `git push` from the worktree updates the PR. Review comments are
    readable via the GitHub API (github_access.py) or `gh pr view --comments`
    where `gh` is installed.
-7. Once the user approves, they merge the PR on GitHub. Anyone can then
-   `git pull` on `main` and run `pr_flow.py cleanup`, which removes the
-   worktrees and local branches of merged PRs.
+7. Once the user approves, they merge the PR on GitHub. Removing merged
+   worktrees is then the agent's routine duty, never something to ask of the
+   user: in a later session, once `main` has been pulled past the merge, run
+   `pr_flow.py cleanup`, which removes the worktrees and local branches of
+   merged PRs. It must run where the worktree paths exist — normally the dev
+   container; a host-side run skips worktrees it cannot see.
 
 ## What the container may push
 
