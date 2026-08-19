@@ -68,6 +68,9 @@ from .worktrees import primary_worktree, secondary_worktrees, worktree_for_branc
 CLAUDE_NAME = "Claude"
 CLAUDE_EMAIL = "noreply@anthropic.com"
 
+# The branch every PR targets, and that feature branches fork from.
+BASE_BRANCH = "main"
+
 
 def run(cmd: list[str], cwd: Path):
     subprocess.run(cmd, check=True, cwd=cwd)
@@ -96,7 +99,29 @@ def copy_setup_state(main: Path, cfg: DevenvConfig, worktree: Path):
         shutil.copy2(main / rel, worktree / rel)
 
 
-def branch_adds_commits(main: Path, branch: str, base: str = "main") -> bool:
+def worktree_start_point(main: Path, *, from_head: bool) -> str:
+    """What a new branch forks from: origin's base branch, unless asked otherwise.
+
+    Forking from the local base instead would sweep any commit it carries that
+    origin lacks into the next PR, credited to whoever opens it. That is not an
+    edge case here: the container cannot push the base branch, so commits made
+    in the primary checkout sit there unpushed as a matter of course, and the
+    first feature branch pushed after them takes them along."""
+    if from_head:
+        return "HEAD"
+    run(["git", "fetch", "--quiet", "origin", BASE_BRANCH], cwd=main)
+    ahead = git_out(main, "log", "--oneline", f"origin/{BASE_BRANCH}..{BASE_BRANCH}")
+    if ahead:
+        lines = ahead.splitlines()
+        print(f"Local {BASE_BRANCH} is {len(lines)} commit(s) ahead of origin/{BASE_BRANCH}:")
+        for line in lines:
+            print(f"  {line}")
+        print(f"Branching from origin/{BASE_BRANCH} so they stay out of the PR")
+        print("(--from-head to build on them instead).")
+    return f"origin/{BASE_BRANCH}"
+
+
+def branch_adds_commits(main: Path, branch: str, base: str = BASE_BRANCH) -> bool:
     """Whether `branch` carries commits `base` lacks."""
     return bool(git_out(main, "rev-list", f"{base}..{branch}"))
 
@@ -143,8 +168,9 @@ def teardown_branch(main: Path, branch: str, *, force: bool) -> bool:
 def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
+    start = worktree_start_point(main, from_head=args.from_head)
     path = cfg.worktrees_dir / args.branch
-    run(["git", "worktree", "add", str(path), "-b", args.branch], cwd=main)
+    run(["git", "worktree", "add", str(path), "-b", args.branch, start], cwd=main)
     # Worktrees don't inherit the primary checkout's untracked setup stamp.
     copy_setup_state(main, cfg, path)
     run(["git", "config", "extensions.worktreeConfig", "true"], cwd=main)
@@ -176,7 +202,7 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
         print_handoff(existing["html_url"])
     else:
         body = Path(args.body_file).read_text() if args.body_file else args.body
-        pr = open_pr(slug, head=args.branch, base="main", title=args.title, body=body)
+        pr = open_pr(slug, head=args.branch, base=BASE_BRANCH, title=args.title, body=body)
         print_handoff(pr["html_url"])
     print_stale_report(cfg)
 
@@ -199,7 +225,7 @@ def branch_pr_merged(slug: str, branch: str) -> bool:
 def cmd_cleanup(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
-    run(["git", "fetch", "--quiet", "origin", "main"], cwd=main)
+    run(["git", "fetch", "--quiet", "origin", BASE_BRANCH], cwd=main)
     slug = origin_repo(main)
     removed = 0
     for entry in secondary_worktrees(main):
@@ -240,6 +266,12 @@ def parse_args() -> argparse.Namespace:
 
     p = sub.add_parser("worktree", help="create a worktree + branch with a Claude identity")
     p.add_argument("branch", help="branch (and worktree directory) name")
+    p.add_argument(
+        "--from-head",
+        action="store_true",
+        help=f"branch from the checkout's HEAD instead of origin/{BASE_BRANCH}, when the work "
+        f"builds on local commits {BASE_BRANCH} has not pushed yet",
+    )
     p.set_defaults(func=cmd_worktree)
 
     p = sub.add_parser("create", help="push a branch to origin and open its GitHub PR")

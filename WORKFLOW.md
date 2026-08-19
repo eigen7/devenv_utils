@@ -21,7 +21,12 @@ devenv_utils working clone; run it from the repo the change targets.
    `/workspace/mount/worktrees/<project>/<branch>` on a new branch, with the
    `.env.json` setup stamp copied and a Claude commit identity so the PR
    distinguishes Claude's commits from the user's. Worktrees live under the
-   mount so in-progress work survives container relaunches.
+   mount so in-progress work survives container relaunches. The branch forks
+   from `origin/main`, not from the checkout's `HEAD`: the container cannot
+   push `main`, so the user's own commits routinely sit there unpushed, and
+   forking from them would carry them into your PR under your name. When that
+   happens the command says which commits it left behind; pass `--from-head`
+   if your change genuinely builds on them.
 2. Make the changes in the worktree, as atomic commits reviewable in
    isolation. For substantial work, the user may first ask for a plan
    review ([skills/plan-review/SKILL.md](skills/plan-review/SKILL.md)): a

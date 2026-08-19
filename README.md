@@ -58,7 +58,8 @@ stays mostly invisible. A typical change:
    removes the worktrees and local branches of merged PRs.
 
 Committing directly on `main` needs no ceremony: commit and push from the
-host, as in any repo.
+host, as in any repo. Commits you have not pushed yet stay yours: the agent's
+branches fork from `origin/main`, so they never ride along in its next PR.
 
 ## The vendored subtree, day to day
 
