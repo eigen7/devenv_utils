@@ -22,6 +22,17 @@ devenv_utils working clone; run it from the repo the change targets.
    `.env.json` setup stamp copied and a Claude commit identity so the PR
    distinguishes Claude's commits from the user's. Worktrees live under the
    mount so in-progress work survives container relaunches.
+
+   What does *not* carry over: a project whose Python import setup is
+   anchored to the primary checkout's absolute path — e.g. a build-time
+   site-packages `.pth` file, or `ENV PYTHONPATH=<primary-checkout>/py` — a
+   common way to make `py/` importable without the rootdir conflicts a
+   relative `PYTHONPATH` causes in pytest. That baked-in path still resolves
+   to the primary checkout inside a worktree, so Python there silently
+   imports the primary checkout's modules instead of the worktree's own,
+   with no error. Check the project's CLAUDE.md for how it wires up `py/`
+   imports; if it uses this pattern, export `PYTHONPATH=<worktree>/py`
+   before running Python or tests in the worktree.
 2. Make the changes in the worktree, as atomic commits reviewable in
    isolation. For substantial work, the user may first ask for a plan
    review ([skills/plan-review/SKILL.md](skills/plan-review/SKILL.md)): a

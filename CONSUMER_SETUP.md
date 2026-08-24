@@ -45,7 +45,12 @@ Then:
 1. Fill in `devenv.toml` (name, `[services]`, versions). Add any project
    constants to `setup_common.py`.
 2. Write `docker-setup/Dockerfile` — the image `setup_wizard.py` builds and
-   `run_docker.py` runs (crib from an existing consumer).
+   `run_docker.py` runs (crib from an existing consumer). If you make `py/`
+   importable via a build-time absolute path (a common way to dodge the
+   rootdir conflicts a relative `PYTHONPATH` causes in pytest), document that
+   in your `CLAUDE.md` — that path silently points at the primary checkout
+   inside a worktree instead of the worktree's own `py/`; see WORKFLOW.md's
+   note on Python imports for the fix agents need to apply.
 3. Add any project-specific steps (data downloads, credential templates, ...)
    to `setup_wizard.py`'s `SetupWizard` class, then run `./setup_wizard.py`.
    The scaffolded wizard already covers the generic steps: the workflow git
