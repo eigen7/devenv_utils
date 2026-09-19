@@ -1,13 +1,13 @@
-"""Multi-repo workspaces: detecting membership and the identity mounts.
+"""Multi-repo workshops: detecting membership and the identity mounts.
 
-A workspace is a repo that assembles component repos as building blocks
-(WORKSPACES.md). Its `workspace.toml` names the components by URL, and each
-component is cloned into a directory inside the workspace. Components know
-nothing about workspaces: membership is detected here, from where a clone sits
+A workshop is a repo that assembles component repos as building blocks
+(WORKSHOPS.md). Its `workshop.toml` names the components by URL, and each
+component is cloned into a directory inside the workshop. Components know
+nothing about workshops: membership is detected here, from where a clone sits
 (`find_membership`), never from anything committed in the component.
 
-Inside workspace `W`, a component's dev container gets names namespaced by `W`
-(see config.load_config), plus identity mounts: the workspace directory, and
+Inside workshop `W`, a component's dev container gets names namespaced by `W`
+(see config.load_config), plus identity mounts: the workshop directory, and
 any component mount dir outside it, each bind-mounted at its own host path.
 Host paths are then valid in every component's container.
 """
@@ -20,9 +20,9 @@ from pathlib import Path
 from .console import SetupException, print_red
 from .state import get_env_json
 
-MANIFEST = "workspace.toml"
+MANIFEST = "workshop.toml"
 
-# The workspace name prefixes container names and gateway hostnames, so it must
+# The workshop name prefixes container names and gateway hostnames, so it must
 # be a DNS label (the same rule config.py applies to project names).
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -37,7 +37,7 @@ class Component:
 
 
 @dataclass(frozen=True)
-class Workspace:
+class Workshop:
     name: str
     root: Path
     components: tuple[Component, ...]
@@ -56,8 +56,8 @@ def _parse_component(root: Path, key: str, table: dict) -> Component:
     )
 
 
-def load_workspace(root: Path) -> Workspace:
-    """Parse `root`/workspace.toml."""
+def load_workshop(root: Path) -> Workshop:
+    """Parse `root`/workshop.toml."""
     root = root.resolve()
     data = tomllib.loads((root / MANIFEST).read_text())
     name = data.get("name", "")
@@ -69,7 +69,7 @@ def load_workspace(root: Path) -> Workspace:
     components = tuple(
         _parse_component(root, key, table) for key, table in data.get("components", {}).items()
     )
-    return Workspace(name=name, root=root, components=components)
+    return Workshop(name=name, root=root, components=components)
 
 
 def _main_checkout(repo_root: Path) -> Path:
@@ -83,18 +83,18 @@ def _main_checkout(repo_root: Path) -> Path:
     return repo_root.resolve()
 
 
-def find_membership(repo_root: Path) -> tuple[Workspace, Component] | None:
-    """The workspace `repo_root` belongs to, and its component entry; None when
+def find_membership(repo_root: Path) -> tuple[Workshop, Component] | None:
+    """The workshop `repo_root` belongs to, and its component entry; None when
     standalone. Walks up from the checkout's main clone to the nearest
-    workspace.toml and looks for a component at that path. A worktree of a
+    workshop.toml and looks for a component at that path. A worktree of a
     component clone counts as that component."""
     checkout = _main_checkout(repo_root)
     for parent in checkout.parents:
         if (parent / MANIFEST).is_file():
-            workspace = load_workspace(parent)
-            for component in workspace.components:
+            workshop = load_workshop(parent)
+            for component in workshop.components:
                 if component.path == checkout:
-                    return workspace, component
+                    return workshop, component
             return None
     return None
 
@@ -109,13 +109,13 @@ def _outermost(paths: list[Path]) -> list[Path]:
     return kept
 
 
-def identity_mount_paths(workspace: Workspace) -> list[Path]:
-    """The host paths to bind-mount at themselves: the workspace directory, plus
+def identity_mount_paths(workshop: Workshop) -> list[Path]:
+    """The host paths to bind-mount at themselves: the workshop directory, plus
     each component's mount dir (the MOUNT_DIR in its .env.json) where that
     points outside it -- a per-machine choice to share a data dir across
-    workspaces. Missing paths are reported and skipped."""
-    candidates = [workspace.root]
-    for component in workspace.components:
+    workshops. Missing paths are reported and skipped."""
+    candidates = [workshop.root]
+    for component in workshop.components:
         mount_dir = get_env_json(component.path / ".env.json").get("MOUNT_DIR")
         if mount_dir:
             candidates.append(Path(mount_dir))
@@ -124,13 +124,13 @@ def identity_mount_paths(workspace: Workspace) -> list[Path]:
         if path.is_dir():
             paths.append(path.resolve())
         else:
-            print_red(f"Workspace path {path} does not exist; not mounting it.")
+            print_red(f"Workshop path {path} does not exist; not mounting it.")
     return sorted(_outermost(paths))
 
 
-def dev_container_args(workspace: Workspace) -> list[str]:
+def dev_container_args(workshop: Workshop) -> list[str]:
     """`docker run` args that bind-mount each identity path at itself."""
     args = []
-    for path in identity_mount_paths(workspace):
+    for path in identity_mount_paths(workshop):
         args += ["-v", f"{path}:{path}"]
     return args

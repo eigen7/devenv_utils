@@ -21,8 +21,8 @@ per-project configuration it consumes is the `[services]` table in
   publishes ports of its own.
 - **Routing by hostname**: each service named in a project's `[services]`
   table is reachable at `http://<project>-<service>.localhost`, or
-  `http://<workspace>-<project>-<service>.localhost` when the project's clone
-  is a component of a multi-repo workspace ([WORKSPACES.md](WORKSPACES.md)).
+  `http://<workshop>-<project>-<service>.localhost` when the project's clone
+  is a component of a multi-repo workshop ([WORKSHOPS.md](WORKSHOPS.md)).
   Names under
   `.localhost` resolve to loopback in browsers (RFC 6761) and in
   systemd-resolved — no host DNS configuration, no `/etc/hosts` entries.

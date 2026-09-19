@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Callable
 
-from . import gateway_service, github_access, workspace
+from . import gateway_service, github_access, workshop
 from .config import DevenvConfig
 from .console import SetupException
 from .docker_ops import (
@@ -141,14 +141,14 @@ def _launch_fresh(
     # Wire the dev container up to the GitHub token mount (see github_access.py),
     # to the gateway service -- starting it if stopped: routing labels,
     # published ports, and DEVENV_SERVICE_URL_* env derived from [services] --
-    # and, for a workspace member, to its siblings' identity mounts (see
-    # workspace.py).
+    # and, for a workshop member, to its siblings' identity mounts (see
+    # workshop.py).
     host_network = "--network=host" in config.extra_docker_args + extra_args
     try:
         extra_args = extra_args + github_access.dev_container_args()
         extra_args = extra_args + gateway_service.dev_container_args(config, host_network)
-        if config.workspace is not None:
-            extra_args = extra_args + workspace.dev_container_args(config.workspace)
+        if config.workshop is not None:
+            extra_args = extra_args + workshop.dev_container_args(config.workshop)
     except SetupException as e:
         print(e)
         sys.exit(1)

@@ -75,14 +75,14 @@ never clash across projects. `run_docker.py` prints the service → URL table at
 every launch. See [GATEWAY.md](GATEWAY.md); a server behind the gateway only
 needs to bind `0.0.0.0` (not loopback) and accept its `.localhost` hostname.
 
-## Multi-repo workspaces
+## Multi-repo workshops
 
-A consumer repo can be a component of any number of multi-repo *workspaces*:
+A consumer repo can be a component of any number of multi-repo *workshops*:
 repos that assemble components by URL and clone them inside themselves. The
 consumer needs nothing for this, and must not declare it. When its clone sits
-inside a workspace, `load_config()` detects that, and the dev container gets
-workspace-namespaced names plus the workspace's identity mounts. See
-[WORKSPACES.md](WORKSPACES.md).
+inside a workshop, `load_config()` detects that, and the dev container gets
+workshop-namespaced names plus the workshop's identity mounts. See
+[WORKSHOPS.md](WORKSHOPS.md).
 
 ## What stays project-specific
 

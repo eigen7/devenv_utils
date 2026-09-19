@@ -15,7 +15,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .workspace import Component, Workspace, find_membership
+from .workshop import Component, Workshop, find_membership
 
 # Service names and the project name become DNS labels (under `.localhost`) and
 # env-var suffixes, so they are restricted to lowercase letters, digits, and
@@ -108,11 +108,11 @@ class DevenvConfig:
     # a mount cannot collide. Meaningful only inside the container, and only
     # for projects with a mount dir.
     worktrees_dir: Path | None = None
-    # The multi-repo workspace this checkout is a component of (workspace.py),
+    # The multi-repo workshop this checkout is a component of (workshop.py),
     # or None when standalone. Detected by load_config() from where the clone
     # sits; never set from devenv.toml, since a component must not be tied to
-    # any one workspace.
-    workspace: Workspace | None = None
+    # any one workshop.
+    workshop: Workshop | None = None
 
     def __post_init__(self):
         self.repo_root = Path(self.repo_root)
@@ -148,11 +148,11 @@ class DevenvConfig:
     @property
     def route_name(self) -> str:
         """The name the gateway routes by (http://<route_name>-<service>.localhost):
-        the project name, prefixed by the workspace name inside a workspace so
-        the same component in two workspaces gets distinct hostnames."""
-        if self.workspace is None:
+        the project name, prefixed by the workshop name inside a workshop so
+        the same component in two workshops gets distinct hostnames."""
+        if self.workshop is None:
             return self.name
-        return f"{self.workspace.name}-{self.name}"
+        return f"{self.workshop.name}-{self.name}"
 
 
 # devenv.toml keys whose values are paths, resolved relative to the repo root.
@@ -172,29 +172,29 @@ def load_config(repo_root: Path) -> DevenvConfig:
     never from the file.
     """
     data = tomllib.loads((repo_root / "devenv.toml").read_text())
-    if "workspace" in data:
+    if "workshop" in data:
         raise ValueError(
-            "devenv.toml must not set `workspace`: membership is detected from where the "
-            "clone sits (WORKSPACES.md)."
+            "devenv.toml must not set `workshop`: membership is detected from where the "
+            "clone sits (WORKSHOPS.md)."
         )
     kwargs = {k: (repo_root / v if k in _PATH_FIELDS else v) for k, v in data.items()}
     membership = find_membership(repo_root)
     if membership is not None:
-        kwargs.update(_workspace_overrides(kwargs, *membership))
+        kwargs.update(_workshop_overrides(kwargs, *membership))
     return DevenvConfig(repo_root=repo_root, **kwargs)
 
 
-def _workspace_overrides(kwargs: dict, workspace: Workspace, component: Component) -> dict:
-    """The DevenvConfig fields a workspace namespaces, so the same component can
-    run in several workspaces at once: the container name, the image tag (two
-    workspaces may hold different Dockerfiles), and the default mount dir, which
-    sits next to the clone inside the workspace."""
+def _workshop_overrides(kwargs: dict, workshop: Workshop, component: Component) -> dict:
+    """The DevenvConfig fields a workshop namespaces, so the same component can
+    run in several workshops at once: the container name, the image tag (two
+    workshops may hold different Dockerfiles), and the default mount dir, which
+    sits next to the clone inside the workshop."""
     name = kwargs["name"]
     image = kwargs.get("image") or name
     image_repo = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
     return {
-        "workspace": workspace,
-        "instance_name": f"{workspace.name}-{name}",
-        "image": f"{image_repo}:{workspace.name}",
-        "default_mount_dir": workspace.root / f"{component.key}-mount",
+        "workshop": workshop,
+        "instance_name": f"{workshop.name}-{name}",
+        "image": f"{image_repo}:{workshop.name}",
+        "default_mount_dir": workshop.root / f"{component.key}-mount",
     }
