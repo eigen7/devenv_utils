@@ -106,6 +106,11 @@ class DevenvConfig:
     # a mount cannot collide. Meaningful only inside the container, and only
     # for projects with a mount dir.
     worktrees_dir: Path | None = None
+    # Directory holding a workspace.toml that lists sibling member repos. When
+    # set, the dev container also bind-mounts that directory and every member's
+    # repo and mount dir at their own host paths (see workspace.py). None: no
+    # workspace.
+    workspace: Path | None = None
 
     def __post_init__(self):
         self.repo_root = Path(self.repo_root)
@@ -131,6 +136,8 @@ class DevenvConfig:
             self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
+        if self.workspace is not None:
+            self.workspace = Path(self.workspace)
         self.services = {name: _coerce_service(v) for name, v in self.services.items()}
         if self.services:
             _validate_dns_label("project name", self.name)
@@ -140,7 +147,14 @@ class DevenvConfig:
 
 # devenv.toml keys whose values are paths, resolved relative to the repo root.
 _PATH_FIELDS = frozenset(
-    {"docker_context", "env_json_path", "target_dir", "default_mount_dir", "worktrees_dir"}
+    {
+        "docker_context",
+        "env_json_path",
+        "target_dir",
+        "default_mount_dir",
+        "worktrees_dir",
+        "workspace",
+    }
 )
 
 
