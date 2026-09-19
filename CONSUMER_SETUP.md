@@ -77,30 +77,12 @@ needs to bind `0.0.0.0` (not loopback) and accept its `.localhost` hostname.
 
 ## Multi-repo workspaces
 
-Some projects are developed together and hand files to each other: one repo
-trains a model, another consumes it. List them as members of a *workspace*, a
-directory holding a `workspace.toml`:
-
-```toml
-# Member repos, relative to this file. Each member's mount dir is the
-# MOUNT_DIR recorded in its .env.json.
-members = ["../faceswap", "faceswap-training", "videogen"]
-```
-
-Each member then opts in from its own `devenv.toml`, with a path relative to
-the repo:
-
-```toml
-workspace = "../facelab"
-```
-
-The member's dev container then also bind-mounts the workspace directory and
-every member's repo and mount dir, **each at its own host path**. The
-container's own `/workspace/repo` and `/workspace/mount` are unchanged. Host
-paths then work in every member's container: files are handed between projects
-by path, and git worktrees created on the host resolve inside the containers.
-If a path is missing (say, a member that isn't set up), it's reported and
-skipped. See [workspace.py](workspace.py).
+A consumer repo can be a component of any number of multi-repo *workspaces*:
+repos that assemble components by URL and clone them inside themselves. The
+consumer needs nothing for this, and must not declare it. When its clone sits
+inside a workspace, `load_config()` detects that, and the dev container gets
+workspace-namespaced names plus the workspace's identity mounts. See
+[WORKSPACES.md](WORKSPACES.md).
 
 ## What stays project-specific
 

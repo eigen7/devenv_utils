@@ -1,7 +1,8 @@
 # Multi-repo workspaces
 
-Status: design, for review in PR #19. The implementation follows once the
-design is approved.
+Status: design approved 2026-09-19. PR #19 implements the membership core:
+manifest parsing, detection, namespacing and identity mounts. The `ws` tool
+follows in later PRs.
 
 A **workspace** is a repo that assembles existing repos as building blocks,
 and inside which you change all of them so they work together. For example:
@@ -110,16 +111,16 @@ commit = "79ce339..."
 
 ## Membership: detection by containment
 
-A component's launcher (`run_docker.py`, via devenv_utils) decides whether
-it's in a workspace, and which one, without reading anything committed in
-the component:
+A component's `load_config()` decides whether it's in a workspace, and which
+one, without reading anything committed in the component. It walks up from
+the checkout to the nearest `workspace.toml` and checks whether that manifest
+lists a component at this path. A worktree of a component clone counts as that
+component. If no manifest lists it, the component is standalone and behaves
+exactly as today.
 
-1. **Explicit local override:** `WORKSPACE_ROOT` in the clone's `.env.json`,
-   which is gitignored and per clone. Used for transitional layouts, such as a
-   clone that hasn't moved into its workspace directory yet.
-2. **Otherwise, walk up** from the repo root to the first `workspace.toml`
-   that lists this directory as a component.
-3. **Neither:** standalone, and behavior is exactly as today.
+Membership is purely where the clone sits. A clone outside any workspace
+directory is standalone; to bring one into a workspace, clone it there (see
+[Migrating an existing setup](#migrating-an-existing-setup)).
 
 So the same faceswap code behaves correctly as a clone inside facelab, a
 clone inside character_swap, or a standalone clone.
@@ -128,10 +129,10 @@ clone inside character_swap, or a standalone clone.
 
 | Aspect | Standalone (today) | Inside workspace `W` |
 |---|---|---|
-| Container name | `devenv.toml` `instance_name`, e.g. `faceswap_dev` | `W-<component>`, e.g. `facelab-faceswap`. Two workspaces can run faceswap at once. |
+| Container name | `devenv.toml` `instance_name`, e.g. `faceswap_dev` | `W-<name>` (the devenv.toml `name`), e.g. `facelab-faceswap`. Two workspaces can run faceswap at once. |
 | Gateway hostnames | `<name>-<service>.localhost` | `W-<name>-<service>.localhost` |
 | Image tag | `<image>` | `<image-repo>:W`. Two workspaces on different component branches can have different Dockerfiles; the layer cache is shared. |
-| Mounts | `/workspace/repo`, `/workspace/mount` | the same, **plus identity mounts:** the workspace dir at its host path, plus any component repo or mount outside it (only possible through local overrides) |
+| Mounts | `/workspace/repo`, `/workspace/mount` | the same, **plus identity mounts:** the workspace dir at its host path, plus any component mount dir outside it (a local `MOUNT_DIR` choice to share data) |
 | Default mount dir (wizard) | `devenv.toml` `default_mount_dir` | `W/<component>-mount` |
 | Claude memory | per repo | `~/.claude/projects/W/memory`, written into each clone's `.claude/settings.local.json` by `ws setup` |
 
@@ -181,23 +182,37 @@ components), it belongs in the workspace repo.
 - **Components need a devenv_utils version with workspace detection.** Until
   a component pulls it, that component runs standalone even inside a
   workspace: nothing breaks, and `ws status` flags it.
-- **Rework of this PR (#19):**
-  - Drop the committed `devenv.toml` `workspace` key; it tied a component to
-    one workspace.
-  - Keep the identity-mount computation.
-  - Add the manifest parsing, containment detection, the `.env.json`
-    `WORKSPACE_ROOT` override, and namespaced container/image/hostname
-    names.
+- **`devenv.toml` must not set `workspace`.** `load_config` rejects it,
+  since a component must never be tied to one workspace.
+- **This PR (#19):** manifest parsing, detection by containment,
+  namespaced container, image and hostname names, the workspace default
+  mount dir, and identity mounts.
 - **Follow-up PRs:**
   1. `ws setup` / `status` / `sync` / `lock`, plus `scaffold_workspace.py`.
   2. `ws exec` / `up`.
   3. `ws branch`, and host-side `pr_flow`.
-- **facelab migration:**
-  - Convert `workspace.toml` to the manifest format.
-  - videogen already sits inside facelab.
-  - faceswap and faceswap-training get the `WORKSPACE_ROOT` override in their
-    `.env.json` until their jobs finish and they move in.
-  - Their running containers keep their current names until relaunched.
+
+## Migrating an existing setup
+
+Don't move existing clones into a workspace. Set the workspace up fresh, as a
+collaborator would:
+
+1. Clone (or pull) the workspace repo.
+2. Clone each component into it. `ws setup` does this once it exists; until
+   then, `git clone <url> <key>` per manifest entry.
+3. Run each component's `setup_wizard.py`. It offers
+   `<workspace>/<key>-mount` as the mount dir, and builds the
+   workspace-tagged image.
+4. Bring over artifacts that are expensive to recreate (datasets, weights,
+   checkpoints) by hand, instead of downloading them again.
+   - On the same filesystem, `mv` the specific directories: instant, with no
+     extra space.
+   - Alternatively, point the new clone's `MOUNT_DIR` at the existing mount
+     to share it (see the per-machine note under
+     [Topology](#topology-on-disk)).
+
+The old standalone clones keep working as they are. Retire them once nothing
+runs from them, after pushing any branches that exist only locally.
 
 ## Alternatives considered
 

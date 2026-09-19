@@ -15,6 +15,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .workspace import Component, Workspace, find_membership
+
 # Service names and the project name become DNS labels (under `.localhost`) and
 # env-var suffixes, so they are restricted to lowercase letters, digits, and
 # hyphens, starting with a letter.
@@ -106,11 +108,11 @@ class DevenvConfig:
     # a mount cannot collide. Meaningful only inside the container, and only
     # for projects with a mount dir.
     worktrees_dir: Path | None = None
-    # Directory holding a workspace.toml that lists sibling member repos. When
-    # set, the dev container also bind-mounts that directory and every member's
-    # repo and mount dir at their own host paths (see workspace.py). None: no
-    # workspace.
-    workspace: Path | None = None
+    # The multi-repo workspace this checkout is a component of (workspace.py),
+    # or None when standalone. Detected by load_config() from where the clone
+    # sits; never set from devenv.toml, since a component must not be tied to
+    # any one workspace.
+    workspace: Workspace | None = None
 
     def __post_init__(self):
         self.repo_root = Path(self.repo_root)
@@ -136,25 +138,26 @@ class DevenvConfig:
             self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
-        if self.workspace is not None:
-            self.workspace = Path(self.workspace)
         self.services = {name: _coerce_service(v) for name, v in self.services.items()}
         if self.services:
             _validate_dns_label("project name", self.name)
+            _validate_dns_label("route name", self.route_name)
             for service_name in self.services:
                 _validate_dns_label("service name", service_name)
+
+    @property
+    def route_name(self) -> str:
+        """The name the gateway routes by (http://<route_name>-<service>.localhost):
+        the project name, prefixed by the workspace name inside a workspace so
+        the same component in two workspaces gets distinct hostnames."""
+        if self.workspace is None:
+            return self.name
+        return f"{self.workspace.name}-{self.name}"
 
 
 # devenv.toml keys whose values are paths, resolved relative to the repo root.
 _PATH_FIELDS = frozenset(
-    {
-        "docker_context",
-        "env_json_path",
-        "target_dir",
-        "default_mount_dir",
-        "worktrees_dir",
-        "workspace",
-    }
+    {"docker_context", "env_json_path", "target_dir", "default_mount_dir", "worktrees_dir"}
 )
 
 
@@ -169,5 +172,29 @@ def load_config(repo_root: Path) -> DevenvConfig:
     never from the file.
     """
     data = tomllib.loads((repo_root / "devenv.toml").read_text())
+    if "workspace" in data:
+        raise ValueError(
+            "devenv.toml must not set `workspace`: membership is detected from where the "
+            "clone sits (WORKSPACES.md)."
+        )
     kwargs = {k: (repo_root / v if k in _PATH_FIELDS else v) for k, v in data.items()}
+    membership = find_membership(repo_root)
+    if membership is not None:
+        kwargs.update(_workspace_overrides(kwargs, *membership))
     return DevenvConfig(repo_root=repo_root, **kwargs)
+
+
+def _workspace_overrides(kwargs: dict, workspace: Workspace, component: Component) -> dict:
+    """The DevenvConfig fields a workspace namespaces, so the same component can
+    run in several workspaces at once: the container name, the image tag (two
+    workspaces may hold different Dockerfiles), and the default mount dir, which
+    sits next to the clone inside the workspace."""
+    name = kwargs["name"]
+    image = kwargs.get("image") or name
+    image_repo = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
+    return {
+        "workspace": workspace,
+        "instance_name": f"{workspace.name}-{name}",
+        "image": f"{image_repo}:{workspace.name}",
+        "default_mount_dir": workspace.root / f"{component.key}-mount",
+    }

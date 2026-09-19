@@ -229,7 +229,7 @@ def dev_container_args(config: DevenvConfig, host_network: bool) -> list[str]:
     # rejoins by name on start.
     ensure_network()
     ensure_started()
-    return container_args(config.name, config.services, service["http_port"])
+    return container_args(config.route_name, config.services, service["http_port"])
 
 
 def ensure_running_container_attached(config: DevenvConfig, instance_name: str, host_network: bool):
@@ -272,7 +272,7 @@ def launch_urls(config: DevenvConfig, host_network: bool) -> dict[str, str]:
     service = load_service_config()
     if service is None:
         raise SetupException(NOT_PROVISIONED_MESSAGE)
-    return service_urls(config.name, config.services, service["http_port"])
+    return service_urls(config.route_name, config.services, service["http_port"])
 
 
 # ---- Docker plumbing -----------------------------------------------------
