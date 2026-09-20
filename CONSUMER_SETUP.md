@@ -83,8 +83,9 @@ consumer needs nothing for this, and must not declare it -- membership is
 detected from where a clone sits. When it is inside a workshop, its container,
 image tag and gateway hostnames are prefixed with the workshop name, its
 default mount dir moves next to the clone, and the workshop's directory is
-bind-mounted into the container at the same path it has on the host (so one
-path names the same file on both sides). `workshop.py` documents
+bind-mounted into the container twice: at `/workspace/workshop-mount`, the
+path every component can rely on, and at the same path it has on the host, so
+a host path names the same file on both sides. `workshop.py` documents
 the manifest and the mechanism; `ws.py` drives a workshop.
 
 ## What stays project-specific
