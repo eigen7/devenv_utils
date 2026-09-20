@@ -75,6 +75,18 @@ never clash across projects. `run_docker.py` prints the service → URL table at
 every launch. See [GATEWAY.md](GATEWAY.md); a server behind the gateway only
 needs to bind `0.0.0.0` (not loopback) and accept its `.localhost` hostname.
 
+## Multi-repo workshops
+
+A consumer repo can be a component of any number of multi-repo *workshops*:
+repos that assemble components by URL and clone them inside themselves. The
+consumer needs nothing for this, and must not declare it -- membership is
+detected from where a clone sits. When it is inside a workshop, its container,
+image tag and gateway hostnames are prefixed with the workshop name, its
+default mount dir moves next to the clone, and the workshop's directory is
+bind-mounted into the container at the same path it has on the host, so one
+path names the same file on both sides. `workshop.py` documents
+the manifest and the mechanism; `ws.py` drives a workshop.
+
 ## What stays project-specific
 
 Only `devenv.toml` (your config data, including `[services]`),
