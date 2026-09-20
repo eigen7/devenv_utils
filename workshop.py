@@ -30,28 +30,25 @@ worktree counts as its main clone.
 
 Inside a workshop, `config.DevenvConfig.join_workshop` namespaces the
 component's container name, image tag and default mount dir, and
-`dev_container_args` mounts the workshop into the container, on top of the
-component's own /workspace/repo and /workspace/mount, under two paths:
+`dev_container_args` adds the workshop to the container, on top of the
+component's own /workspace/repo and /workspace/mount, as a *same-path* mount:
 
-    -v /home/me/my-workshop:/workspace/workshop-mount   the short, stable path
-    -v /home/me/my-workshop:/home/me/my-workshop        the same-path mount
+    -v /home/me/my-workshop:/home/me/my-workshop
 
-The short path is what a human types: every component container reaches the
-workshop at /workspace/workshop-mount, whatever the workshop is called or
-where it was cloned. The same-path mount is what makes a *host* path mean the
-same file inside the container, which is what lets components hand files to
-each other by path (through xfer/) with no copying between mounts, and lets a
-git worktree created on the host -- whose .git file records an absolute host
-path -- resolve inside the container.
+The workshop keeps the path it has on the host, so one path names the same
+file on both sides. That is what lets components hand files to each other by
+path (through xfer/) with no copying between mounts, and what lets a git
+worktree created on the host resolve inside the container: a linked
+worktree's .git file records an absolute host path, and git uses that path
+rather than looking for the repo elsewhere.
 
 Any component mount dir kept outside the workshop (a per-machine choice to
 share a data dir between workshops) gets a same-path mount too.
 
-A component's own files are therefore reachable by more than one path, e.g.
-/workspace/repo and /workspace/workshop-mount/<component>. They are the same
-directory, not copies. Use /workspace/repo and /workspace/mount for the
-component you are working in, and the other paths only to reach across
-components.
+A component's own files are therefore reachable by two paths: /workspace/repo
+and <workshop>/<component>. They are the same directory, not copies. Use
+/workspace/repo and /workspace/mount for the component you are working in, and
+host paths only to reach across components.
 
 Separate clones per workshop, rather than one shared checkout, are what let
 each workshop hold its components on its own branches with its own containers.
@@ -66,11 +63,6 @@ from .console import SetupException, print_red
 from .state import get_env_json
 
 MANIFEST = "workshop.toml"
-
-# Where the workshop directory appears inside every component container, next
-# to the component's own /workspace/repo and /workspace/mount. It is mounted
-# here *and* at its host path (see dev_container_args).
-CONTAINER_WORKSHOP_PATH = "/workspace/workshop-mount"
 
 # The workshop name prefixes container names and gateway hostnames, so it must
 # be a DNS label (the same rule config.py applies to project names).
@@ -205,10 +197,9 @@ def same_path_mount_dirs(workshop: Workshop) -> list[Path]:
 
 
 def dev_container_args(workshop: Workshop) -> list[str]:
-    """`docker run` args mounting the workshop: once at the fixed container
-    path every component can rely on, and once (like every other directory
-    here) at its own host path."""
-    args = ["-v", f"{workshop.root}:{CONTAINER_WORKSHOP_PATH}"]
+    """`docker run` args bind-mounting each of those directories at its own
+    host path (`-v <path>:<path>`)."""
+    args = []
     for path in same_path_mount_dirs(workshop):
         args += ["-v", f"{path}:{path}"]
     return args
