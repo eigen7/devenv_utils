@@ -44,7 +44,6 @@ import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .console import SetupException, print_red
 from .state import get_env_json
@@ -71,11 +70,6 @@ class Workshop:
     name: str
     root: Path
     components: tuple[Component, ...]
-    # Whether `ws setup` points each clone's Claude Code settings at one shared
-    # memory directory for the workshop (`shared_claude_memory` in the
-    # manifest). Off unless the workshop asks for it: it writes a developer's
-    # personal tool settings.
-    shared_claude_memory: bool
 
 
 @dataclass(frozen=True)
@@ -127,12 +121,7 @@ def load_workshop(root: Path) -> Workshop:
     components = tuple(
         _parse_component(root, key, table) for key, table in data.get("components", {}).items()
     )
-    return Workshop(
-        name=name,
-        root=root,
-        components=components,
-        shared_claude_memory=data.get("shared_claude_memory", False),
-    )
+    return Workshop(name=name, root=root, components=components)
 
 
 def _main_checkout(repo_root: Path) -> Path:
@@ -146,7 +135,7 @@ def _main_checkout(repo_root: Path) -> Path:
     return repo_root.resolve()
 
 
-def find_membership(repo_root: Path) -> Optional[Membership]:
+def find_membership(repo_root: Path) -> Membership | None:
     """Where `repo_root` sits in a workshop, or None when standalone.
 
     Walks up from the checkout's main clone to the nearest manifest and looks

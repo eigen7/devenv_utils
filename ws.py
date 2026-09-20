@@ -40,7 +40,6 @@ if __package__ in (None, ""):
     __package__ = "devenv_utils"
 
 import argparse
-import json
 import subprocess
 
 from .config import load_config
@@ -54,11 +53,6 @@ from .console import (
 from .docker_ops import is_container_running
 from .state import get_env_json, in_docker_container
 from .workshop import MANIFEST, Component, Workshop, load_workshop
-
-# Only for workshops that set `shared_claude_memory` (see workshop.py). Claude
-# Code ignores an autoMemoryDirectory in the checked-in settings.json, so the
-# pointer has to go in this per-machine, gitignored file.
-CLAUDE_LOCAL_SETTINGS = Path(".claude/settings.local.json")
 
 
 def find_workshop_root(start: Path) -> Path:
@@ -106,33 +100,6 @@ def vendored_supports_workshops(component: Component) -> bool:
     return (component.path / "subtrees/devenv_utils/workshop.py").is_file()
 
 
-def write_claude_memory_setting(workshop: Workshop, directory: Path) -> bool:
-    """Point one directory's Claude Code settings at a memory directory shared
-    across the workshop, leaving that developer's other local settings alone.
-    True if it changed anything.
-
-    Opt-in per workshop (`shared_claude_memory`), because it writes a personal
-    tool's settings: it only makes sense where everyone working in the workshop
-    uses Claude Code and wants one memory across its components."""
-    if not workshop.shared_claude_memory:
-        return False
-    path = directory / CLAUDE_LOCAL_SETTINGS
-    wanted = f"~/.claude/projects/{workshop.name}/memory"
-    settings = {}
-    if path.is_file():
-        try:
-            settings = json.loads(path.read_text())
-        except json.JSONDecodeError:
-            print_red(f"{path} is not valid JSON; not touching it.")
-            return False
-    if settings.get("autoMemoryDirectory") == wanted:
-        return False
-    settings["autoMemoryDirectory"] = wanted
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n")
-    return True
-
-
 def run_wizard(component: Component):
     """Run a component's setup_wizard.py interactively, if the user wants it."""
     wizard = component.path / "setup_wizard.py"
@@ -151,9 +118,6 @@ def run_wizard(component: Component):
 def setup(workshop: Workshop):
     """Clone what's missing, wire up the shared bits, then offer each wizard."""
     (workshop.root / "xfer").mkdir(exist_ok=True)
-    if write_claude_memory_setting(workshop, workshop.root):
-        print(f"Claude memory for the workshop -> ~/.claude/projects/{workshop.name}/memory")
-
     for component in workshop.components:
         print_rule()
         print(f"{component.key}")
@@ -162,7 +126,6 @@ def setup(workshop: Workshop):
         else:
             print(f"Already cloned at {component.path}.")
             check_origin(component)
-        write_claude_memory_setting(workshop, component.path)
         if not component.container:
             continue
         if not (component.path / "devenv.toml").is_file():
