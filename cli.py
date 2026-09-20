@@ -141,7 +141,7 @@ def _launch_fresh(
     # Wire the dev container up to the GitHub token mount (see github_access.py),
     # to the gateway service -- starting it if stopped: routing labels,
     # published ports, and DEVENV_SERVICE_URL_* env derived from [services] --
-    # and, for a workshop member, to its siblings' identity mounts (see
+    # and, for a workshop component, to the workshop's same-path mounts (see
     # workshop.py).
     host_network = "--network=host" in config.extra_docker_args + extra_args
     try:

@@ -1,4 +1,4 @@
-"""Multi-repo workshops: the manifest, membership detection, identity mounts.
+"""Multi-repo workshops: the manifest, membership detection, same-path mounts.
 
 A *workshop* is a repo that assembles component repos as reusable building
 blocks -- one workshop might be faceswap + faceswap-training + videogen, and
@@ -30,11 +30,17 @@ worktree counts as its main clone.
 
 Inside a workshop, `config.DevenvConfig.join_workshop` namespaces the
 component's container name, image tag and default mount dir, and
-`dev_container_args` adds identity mounts: the workshop directory, plus any
-component mount dir kept outside it, each bind-mounted *at its own host path*.
-Host paths are then valid inside every component's container, so components
-hand files to each other by path (through `xfer/`) with no copying between
-mounts, and host-created git worktrees resolve in containers.
+`dev_container_args` adds the workshop's *same-path* mounts, which are
+separate from the component's own /workspace/repo and /workspace/mount: the
+workshop directory (plus any component mount dir kept outside it) is
+bind-mounted at the very path it has on the host, e.g.
+
+    -v /home/me/my-workshop:/home/me/my-workshop
+
+so /home/me/my-workshop/xfer/model.onnx names the same file on the host and in
+every component's container. Components then hand files to each other by path,
+with no copying between mounts, and a git worktree created on the host resolves
+inside the containers.
 
 Separate clones per workshop, rather than one shared checkout, are what let
 each workshop hold its components on its own branches with its own containers.
@@ -163,11 +169,11 @@ def _outermost(paths: list[Path]) -> list[Path]:
     return kept
 
 
-def identity_mount_paths(workshop: Workshop) -> list[Path]:
-    """The host paths to bind-mount at themselves: the workshop directory, plus
-    each component's mount dir (the MOUNT_DIR in its .env.json) where that
-    points outside it -- a per-machine choice to share a data dir across
-    workshops. Missing paths are reported and skipped."""
+def same_path_mount_dirs(workshop: Workshop) -> list[Path]:
+    """The host directories to bind-mount at their own paths: the workshop
+    directory, plus each component's mount dir (the MOUNT_DIR in its .env.json)
+    where that points outside the workshop -- a per-machine choice to share a
+    data dir across workshops. Missing paths are reported and skipped."""
     candidates = [workshop.root]
     for component in workshop.components:
         mount_dir = get_env_json(component.path / ".env.json").get("MOUNT_DIR")
@@ -183,8 +189,9 @@ def identity_mount_paths(workshop: Workshop) -> list[Path]:
 
 
 def dev_container_args(workshop: Workshop) -> list[str]:
-    """`docker run` args that bind-mount each identity path at itself."""
+    """`docker run` args bind-mounting each of those directories at its own
+    host path (`-v <path>:<path>`)."""
     args = []
-    for path in identity_mount_paths(workshop):
+    for path in same_path_mount_dirs(workshop):
         args += ["-v", f"{path}:{path}"]
     return args
