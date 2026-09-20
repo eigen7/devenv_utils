@@ -100,7 +100,7 @@ branch = "main"
 commit = "79ce339..."
 ```
 
-- `ws lock` writes it from the current checkouts. It refuses when a component
+Not implemented yet. `ws lock` writes it from the current checkouts. It refuses when a component
   is dirty, or when its commit isn't on any remote branch, because a
   collaborator couldn't fetch it.
 - `ws sync --locked` checks out exactly those SHAs, which reproduces a
@@ -142,13 +142,20 @@ created on the host resolve inside containers.
 
 ## The `ws` tool
 
-Run from the workshop repo as `./ws <cmd>`, a thin entry point into the
-vendored devenv_utils:
+Run from the workshop repo, which vendors devenv_utils as a subtree, the same
+way the PR tools are run:
+
+```bash
+subtrees/devenv_utils/ws.py setup      # or `./ws setup` with a one-line shim
+```
+
+The workshop root is found by walking up from the working directory, so it
+works from anywhere inside the workshop.
 
 | Command | Does |
 |---|---|
-| `ws setup` | Clones missing components (at the lock, or the tracked branch). Runs each container component's setup wizard with workshop defaults (mount dir, image tag). Writes each clone's `.claude/settings.local.json` (`autoMemoryDirectory`). Idempotent: this is the collaborator's one command after `git clone`. |
-| `ws status` | Per component: branch, dirty, ahead/behind, differs-from-lock, devenv_utils version (warns if too old to support workshops), container running. |
+| `ws setup` | **Implemented.** Clones missing components, creates `xfer/`, points each clone's `.claude/settings.local.json` at the workshop's shared Claude memory, and offers to run each component's `setup_wizard.py`. Idempotent: this is the collaborator's one command after `git clone`. Warns instead of setting up when a component's vendored devenv_utils predates workshops, or when an existing clone's origin differs from the manifest. |
+| `ws status` | **Implemented.** Per component: cloned, branch, dirty, whether devenv_utils supports workshops, whether it has been set up, and whether its container is running. |
 | `ws sync [--locked]` | Fast-forwards components to their tracked branches, or to the lock. |
 | `ws lock` | Writes `workshop.lock` from the current checkouts. |
 | `ws branch <topic> [components...]` | Creates the same topic branch/worktree in several components at once, for one cross-component change. |
@@ -186,9 +193,9 @@ components), it belongs in the workshop repo.
   since a component must never be tied to one workshop.
 - **This PR (#19):** manifest parsing, detection by containment,
   namespaced container, image and hostname names, the workshop default
-  mount dir, and identity mounts.
+  mount dir, identity mounts, and `ws setup` / `ws status`.
 - **Follow-up PRs:**
-  1. `ws setup` / `status` / `sync` / `lock`, plus `scaffold_workshop.py`.
+  1. `ws sync` / `lock` and `workshop.lock`, plus `scaffold_workshop.py`.
   2. `ws exec` / `up`.
   3. `ws branch`, and host-side `pr_flow`.
 
@@ -198,12 +205,12 @@ Don't move existing clones into a workshop. Set the workshop up fresh, as a
 collaborator would:
 
 1. Clone (or pull) the workshop repo.
-2. Clone each component into it. `ws setup` does this once it exists; until
-   then, `git clone <url> <key>` per manifest entry.
-3. Run each component's `setup_wizard.py`. It offers
-   `<workshop>/<key>-mount` as the mount dir, and builds the
-   workshop-tagged image.
-4. Bring over artifacts that are expensive to recreate (datasets, weights,
+2. Run `subtrees/devenv_utils/ws.py setup`. It clones the components, creates
+   `xfer/`, writes the Claude memory setting, and offers to run each
+   component's `setup_wizard.py`, which asks for the mount dir (defaulting to
+   `<workshop>/<key>-mount`, empty to start) and builds the workshop-tagged
+   image.
+3. Bring over artifacts that are expensive to recreate (datasets, weights,
    checkpoints) by hand, instead of downloading them again.
    - On the same filesystem, `mv` the specific directories: instant, with no
      extra space.

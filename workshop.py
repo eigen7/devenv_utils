@@ -32,7 +32,8 @@ class Component:
     key: str
     path: Path
     url: str
-    branch: str
+    # The branch to track, or None to follow the remote's default branch.
+    branch: str | None
     container: bool
 
 
@@ -47,11 +48,13 @@ def _parse_component(root: Path, key: str, table: dict) -> Component:
     path = (root / table.get("path", key)).resolve()
     if not path.is_relative_to(root):
         raise SetupException(f"{root / MANIFEST}: component {key!r} path {path} is outside it.")
+    if "url" not in table:
+        raise SetupException(f"{root / MANIFEST}: component {key!r} has no `url`.")
     return Component(
         key=key,
         path=path,
         url=table["url"],
-        branch=table.get("branch", "main"),
+        branch=table.get("branch"),
         container=table.get("container", True),
     )
 
