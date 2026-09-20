@@ -109,8 +109,8 @@ class DevenvConfig:
     # for projects with a mount dir.
     worktrees_dir: Path | None = None
     # The multi-repo workshop this checkout is a component of (workshop.py),
-    # or None when standalone. Detected by load_config() from where the clone
-    # sits; never set from devenv.toml, since a component must not be tied to
+    # or None when standalone. Set by join_workshop() from what load_config()
+    # detects; never from devenv.toml, since a component must not be tied to
     # any one workshop.
     workshop: Workshop | None = None
 
@@ -141,7 +141,6 @@ class DevenvConfig:
         self.services = {name: _coerce_service(v) for name, v in self.services.items()}
         if self.services:
             _validate_dns_label("project name", self.name)
-            _validate_dns_label("route name", self.route_name)
             for service_name in self.services:
                 _validate_dns_label("service name", service_name)
 
@@ -153,6 +152,25 @@ class DevenvConfig:
         if self.workshop is None:
             return self.name
         return f"{self.workshop.name}-{self.name}"
+
+    def join_workshop(self, workshop: Workshop, component: Component):
+        """Namespace this config for the workshop the checkout sits in, so the
+        same component can run in several workshops at once: its container and
+        its image tag carry the workshop name (two workshops may hold different
+        branches, hence different Dockerfiles), and its data dir sits next to
+        the clone inside the workshop."""
+        self.workshop = workshop
+        self.instance_name = f"{workshop.name}-{self.name}"
+        self.image = f"{_image_repo(self.image)}:{workshop.name}"
+        self.default_mount_dir = workshop.root / f"{component.key}-mount"
+        if self.services:
+            _validate_dns_label("route name", self.route_name)
+
+
+def _image_repo(image: str) -> str:
+    """An image reference without its tag. The last path segment holds the tag,
+    so a registry port (`reg:5000/team/img`) is not mistaken for one."""
+    return image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
 
 
 # devenv.toml keys whose values are paths, resolved relative to the repo root.
@@ -175,26 +193,11 @@ def load_config(repo_root: Path) -> DevenvConfig:
     if "workshop" in data:
         raise ValueError(
             "devenv.toml must not set `workshop`: membership is detected from where the "
-            "clone sits (WORKSHOPS.md)."
+            "clone sits (see workshop.py)."
         )
     kwargs = {k: (repo_root / v if k in _PATH_FIELDS else v) for k, v in data.items()}
+    config = DevenvConfig(repo_root=repo_root, **kwargs)
     membership = find_membership(repo_root)
     if membership is not None:
-        kwargs.update(_workshop_overrides(kwargs, *membership))
-    return DevenvConfig(repo_root=repo_root, **kwargs)
-
-
-def _workshop_overrides(kwargs: dict, workshop: Workshop, component: Component) -> dict:
-    """The DevenvConfig fields a workshop namespaces, so the same component can
-    run in several workshops at once: the container name, the image tag (two
-    workshops may hold different Dockerfiles), and the default mount dir, which
-    sits next to the clone inside the workshop."""
-    name = kwargs["name"]
-    image = kwargs.get("image") or name
-    image_repo = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
-    return {
-        "workshop": workshop,
-        "instance_name": f"{workshop.name}-{name}",
-        "image": f"{image_repo}:{workshop.name}",
-        "default_mount_dir": workshop.root / f"{component.key}-mount",
-    }
+        config.join_workshop(membership.workshop, membership.component)
+    return config

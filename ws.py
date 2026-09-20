@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Drive a workshop: the repo that assembles component repos (WORKSHOPS.md).
+"""Drive a workshop: the repo that assembles component repos (workshop.py).
 
 Run this from the workshop repo, which vendors devenv_utils as a subtree:
 
   ws.py setup
       Bring the workshop up on this machine: clone every component named in
-      workshop.toml, create xfer/, point each clone's Claude Code settings at
-      the workshop's shared memory, and offer to run each component's
+      workshop.toml, create xfer/, and offer to run each component's
       setup_wizard.py. Idempotent -- rerun it after adding a component, and
       it only does what is missing. This is the one command a collaborator
       runs after cloning the workshop repo.
@@ -56,9 +55,9 @@ from .docker_ops import is_container_running
 from .state import get_env_json, in_docker_container
 from .workshop import MANIFEST, Component, Workshop, load_workshop
 
-# Claude Code reads this per-directory settings file but ignores the key in the
-# checked-in settings.json, so the shared-memory pointer has to live here. The
-# file is per machine and gitignored by every consumer.
+# Only for workshops that set `shared_claude_memory` (see workshop.py). Claude
+# Code ignores an autoMemoryDirectory in the checked-in settings.json, so the
+# pointer has to go in this per-machine, gitignored file.
 CLAUDE_LOCAL_SETTINGS = Path(".claude/settings.local.json")
 
 
@@ -68,7 +67,7 @@ def find_workshop_root(start: Path) -> Path:
         if (candidate / MANIFEST).is_file():
             return candidate
     raise SetupException(
-        f"No {MANIFEST} in {start} or any parent. Run this from a workshop repo (WORKSHOPS.md)."
+        f"No {MANIFEST} in {start} or any parent. Run this from a workshop repo (see workshop.py)."
     )
 
 
@@ -108,8 +107,15 @@ def vendored_supports_workshops(component: Component) -> bool:
 
 
 def write_claude_memory_setting(workshop: Workshop, directory: Path) -> bool:
-    """Point one directory's Claude Code settings at the workshop's shared memory
-    directory, leaving any other local settings untouched. True if it changed."""
+    """Point one directory's Claude Code settings at a memory directory shared
+    across the workshop, leaving that developer's other local settings alone.
+    True if it changed anything.
+
+    Opt-in per workshop (`shared_claude_memory`), because it writes a personal
+    tool's settings: it only makes sense where everyone working in the workshop
+    uses Claude Code and wants one memory across its components."""
+    if not workshop.shared_claude_memory:
+        return False
     path = directory / CLAUDE_LOCAL_SETTINGS
     wanted = f"~/.claude/projects/{workshop.name}/memory"
     settings = {}

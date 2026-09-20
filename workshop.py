@@ -1,21 +1,50 @@
-"""Multi-repo workshops: detecting membership and the identity mounts.
+"""Multi-repo workshops: the manifest, membership detection, identity mounts.
 
-A workshop is a repo that assembles component repos as building blocks
-(WORKSHOPS.md). Its `workshop.toml` names the components by URL, and each
-component is cloned into a directory inside the workshop. Components know
-nothing about workshops: membership is detected here, from where a clone sits
-(`find_membership`), never from anything committed in the component.
+A *workshop* is a repo that assembles component repos as reusable building
+blocks -- one workshop might be faceswap + faceswap-training + videogen, and
+another faceswap + something else. Its `workshop.toml` names the components
+by git URL, and each is cloned into a directory inside the workshop, with its
+mount dir alongside:
 
-Inside workshop `W`, a component's dev container gets names namespaced by `W`
-(see config.load_config), plus identity mounts: the workshop directory, and
-any component mount dir outside it, each bind-mounted at its own host path.
-Host paths are then valid in every component's container.
+    my-workshop/            workshop.toml, the workshop repo's own files
+      faceswap/             clone of the component (gitignored)
+      faceswap-mount/       its data dir, MOUNT_DIR in faceswap/.env.json
+      videogen/  videogen-mount/
+      xfer/                 handoff area between components
+
+    # workshop.toml
+    name = "my-workshop"            # DNS label: it prefixes names, see below
+    [components.faceswap]
+    url = "git@github.com:someone/faceswap.git"
+    branch = "main"                 # optional; default is the remote's HEAD
+    [components.somelib]
+    url = "..."
+    container = false               # source-only: cloned, but no dev container
+
+**Components know nothing about workshops.** Nothing about a workshop is
+committed into a component, so the same repo can be a block in several
+workshops (through a separate clone in each) or stand alone. Membership is
+therefore detected from where a clone sits: `find_membership` walks up to the
+nearest manifest and asks whether it lists a component at this path. A linked
+worktree counts as its main clone.
+
+Inside a workshop, `config.DevenvConfig.join_workshop` namespaces the
+component's container name, image tag and default mount dir, and
+`dev_container_args` adds identity mounts: the workshop directory, plus any
+component mount dir kept outside it, each bind-mounted *at its own host path*.
+Host paths are then valid inside every component's container, so components
+hand files to each other by path (through `xfer/`) with no copying between
+mounts, and host-created git worktrees resolve in containers.
+
+Separate clones per workshop, rather than one shared checkout, are what let
+each workshop hold its components on its own branches with its own containers.
 """
 
 import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from .console import SetupException, print_red
 from .state import get_env_json
@@ -42,9 +71,35 @@ class Workshop:
     name: str
     root: Path
     components: tuple[Component, ...]
+    # Whether `ws setup` points each clone's Claude Code settings at one shared
+    # memory directory for the workshop (`shared_claude_memory` in the
+    # manifest). Off unless the workshop asks for it: it writes a developer's
+    # personal tool settings.
+    shared_claude_memory: bool
+
+
+@dataclass(frozen=True)
+class Membership:
+    """A checkout's place in a workshop: which workshop, and as what."""
+
+    workshop: Workshop
+    component: Component
+
+
+# Everything a [components.<key>] table may hold. An unknown key is usually a
+# top-level key written after a table header, which TOML reads as part of that
+# table -- silently changing nothing if it were ignored.
+_COMPONENT_KEYS = frozenset({"url", "branch", "path", "container"})
 
 
 def _parse_component(root: Path, key: str, table: dict) -> Component:
+    unknown = sorted(set(table) - _COMPONENT_KEYS)
+    if unknown:
+        raise SetupException(
+            f"{root / MANIFEST}: component {key!r} has unknown key(s) {', '.join(unknown)}. "
+            f"A component takes {', '.join(sorted(_COMPONENT_KEYS))}; a workshop-level key "
+            "must appear above the first [components.<name>] header."
+        )
     path = (root / table.get("path", key)).resolve()
     if not path.is_relative_to(root):
         raise SetupException(f"{root / MANIFEST}: component {key!r} path {path} is outside it.")
@@ -72,7 +127,12 @@ def load_workshop(root: Path) -> Workshop:
     components = tuple(
         _parse_component(root, key, table) for key, table in data.get("components", {}).items()
     )
-    return Workshop(name=name, root=root, components=components)
+    return Workshop(
+        name=name,
+        root=root,
+        components=components,
+        shared_claude_memory=data.get("shared_claude_memory", False),
+    )
 
 
 def _main_checkout(repo_root: Path) -> Path:
@@ -86,18 +146,20 @@ def _main_checkout(repo_root: Path) -> Path:
     return repo_root.resolve()
 
 
-def find_membership(repo_root: Path) -> tuple[Workshop, Component] | None:
-    """The workshop `repo_root` belongs to, and its component entry; None when
-    standalone. Walks up from the checkout's main clone to the nearest
-    workshop.toml and looks for a component at that path. A worktree of a
-    component clone counts as that component."""
+def find_membership(repo_root: Path) -> Optional[Membership]:
+    """Where `repo_root` sits in a workshop, or None when standalone.
+
+    Walks up from the checkout's main clone to the nearest manifest and looks
+    for a component at that path. A worktree of a component clone counts as
+    that component. A clone that merely sits inside a workshop directory
+    without being listed is standalone."""
     checkout = _main_checkout(repo_root)
     for parent in checkout.parents:
         if (parent / MANIFEST).is_file():
             workshop = load_workshop(parent)
             for component in workshop.components:
                 if component.path == checkout:
-                    return workshop, component
+                    return Membership(workshop=workshop, component=component)
             return None
     return None
 

@@ -79,10 +79,12 @@ needs to bind `0.0.0.0` (not loopback) and accept its `.localhost` hostname.
 
 A consumer repo can be a component of any number of multi-repo *workshops*:
 repos that assemble components by URL and clone them inside themselves. The
-consumer needs nothing for this, and must not declare it. When its clone sits
-inside a workshop, `load_config()` detects that, and the dev container gets
-workshop-namespaced names plus the workshop's identity mounts. See
-[WORKSHOPS.md](WORKSHOPS.md).
+consumer needs nothing for this, and must not declare it -- membership is
+detected from where a clone sits. When it is inside a workshop, its container,
+image tag and gateway hostnames are prefixed with the workshop name, its
+default mount dir moves next to the clone, and the workshop's directory is
+bind-mounted into the container at its own host path. `workshop.py` documents
+the manifest and the mechanism; `ws.py` drives a workshop.
 
 ## What stays project-specific
 
