@@ -51,7 +51,7 @@ Then:
    ```dockerfile
    ARG CLAUDE_CODE_VERSION=latest
    COPY install-claude.sh /tmp/
-   RUN /tmp/install-claude.sh "$CLAUDE_CODE_VERSION"
+   RUN bash /tmp/install-claude.sh "$CLAUDE_CODE_VERSION"
    ```
 
    Every build resolves `claude_code_version` from `devenv.toml` (default

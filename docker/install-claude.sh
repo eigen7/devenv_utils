@@ -5,7 +5,7 @@
 # possible so a version bump rebuilds only the layers after it:
 #     ARG CLAUDE_CODE_VERSION=latest
 #     COPY install-claude.sh /tmp/
-#     RUN /tmp/install-claude.sh "$CLAUDE_CODE_VERSION"
+#     RUN bash /tmp/install-claude.sh "$CLAUDE_CODE_VERSION"
 #
 # The ARG is what makes updates happen: build_image() resolves the configured
 # channel to a concrete version and passes it as a build arg, so the RUN layer
