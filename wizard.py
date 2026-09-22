@@ -433,7 +433,7 @@ class SetupWizardTool:
 
     def build_docker_image(self, context: os.PathLike | None = None):
         c = self.config
-        build_image(c.image, context or c.docker_context)
+        build_image(c.image, context or c.docker_context, claude_code_version=c.claude_code_version)
 
     # ---- Step: NVIDIA --------------------------------------------------
 

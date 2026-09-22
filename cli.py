@@ -37,7 +37,11 @@ def docker_build(config: DevenvConfig):
     )
     args = parser.parse_args()
     try:
-        build_image(args.local_docker_image, config.docker_context)
+        build_image(
+            args.local_docker_image,
+            config.docker_context,
+            claude_code_version=config.claude_code_version,
+        )
     except SetupException as e:
         for arg in e.args:
             print(arg)

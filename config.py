@@ -83,6 +83,10 @@ class DevenvConfig:
     extra_docker_args: list[str] = field(default_factory=list)
     # Unprivileged user the container runs as / VS Code attaches as.
     remote_user: str = "devuser"
+    # Claude Code release baked into the image: a channel ("latest"/"stable"),
+    # resolved to its current version at build time, or an exact version pin.
+    # Only used if the Dockerfile declares `ARG CLAUDE_CODE_VERSION`.
+    claude_code_version: str = "latest"
 
     # Docker build context (holds the project Dockerfile). Defaults to
     # <repo_root>/docker-setup.

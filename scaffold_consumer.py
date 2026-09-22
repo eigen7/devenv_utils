@@ -86,6 +86,10 @@ setup_version = "1.0.0"
 # 127.0.0.1:<port> for non-HTTP traffic.
 # [services]
 # web = 5173
+
+# Claude Code release for the image (see CONSUMER_SETUP.md): "latest",
+# "stable", or an exact version pin.
+# claude_code_version = "latest"
 """,
     "setup_common.py": '''\
 """Project-specific devenv configuration for THIS project.

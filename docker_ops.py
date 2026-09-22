@@ -9,12 +9,15 @@ without those scripts having to physically live in the project tree.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-from .console import SetupException
+from .console import SetupException, print_red
 
 # Shared shell scripts bundled with this package, overlaid into every build
 # context so a project Dockerfile can `COPY entrypoint.sh` / `COPY
@@ -144,22 +147,68 @@ def _copy_into(src: Path, dst: Path):
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
+# Where the native Claude Code installer (install.sh) looks up release
+# channels: GET <base>/<channel> returns that channel's current version string.
+CLAUDE_RELEASES_URL = "https://downloads.claude.ai/claude-code-releases"
+CLAUDE_VERSION_BUILD_ARG = "CLAUDE_CODE_VERSION"
+_EXACT_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-\S+)?$")
+
+
+def resolve_claude_code_version(requested: str) -> str:
+    """The concrete Claude Code version for `requested`: an exact version as-is,
+    or a channel ("latest"/"stable") resolved to its current release.
+
+    The resolved string is passed as a build arg so the install layer is cached
+    exactly as long as the version is unchanged -- a bare "latest" would never
+    invalidate it. If the lookup fails, the channel name is returned unchanged:
+    the build still works, it just reuses whatever layer is cached.
+    """
+    if _EXACT_VERSION_RE.match(requested):
+        return requested
+    url = f"{CLAUDE_RELEASES_URL}/{requested}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            version = response.read().decode().strip()
+    except (urllib.error.URLError, OSError) as e:
+        print_red(
+            f"Could not resolve Claude Code '{requested}' ({e}); a cached install "
+            "layer, if any, will be reused."
+        )
+        return requested
+    if not _EXACT_VERSION_RE.match(version):
+        print_red(f"Unexpected Claude Code version {version!r} from {url}; ignoring it.")
+        return requested
+    return version
+
+
 def build_image(
     image: str,
     context_dir: Path,
     *,
     assets_dir: Path | None = None,
+    claude_code_version: str = "latest",
 ):
     """Build `image` from a staged context.
 
     The staged context is `context_dir` overlaid with `assets_dir` (defaults to
-    this package's bundled docker/ scripts). Raises SetupException on failure.
+    this package's bundled docker/ scripts). If the Dockerfile declares
+    `ARG CLAUDE_CODE_VERSION`, `claude_code_version` is resolved to a concrete
+    release and passed as that build arg, so a new release rebuilds the Claude
+    install layer (and only the layers after it). Raises SetupException on
+    failure.
     """
     context_dir = Path(context_dir)
-    if not (context_dir / "Dockerfile").is_file():
+    dockerfile = context_dir / "Dockerfile"
+    if not dockerfile.is_file():
         raise SetupException(f"No Dockerfile in build context {context_dir}.")
     if assets_dir is None:
         assets_dir = SHARED_DOCKER_ASSETS
+
+    build_args = []
+    if re.search(rf"^\s*ARG\s+{CLAUDE_VERSION_BUILD_ARG}\b", dockerfile.read_text(), re.MULTILINE):
+        version = resolve_claude_code_version(claude_code_version)
+        print(f"Claude Code version: {version}")
+        build_args = ["--build-arg", f"{CLAUDE_VERSION_BUILD_ARG}={version}"]
 
     print(f"Building docker image {image} from {context_dir}...")
     with tempfile.TemporaryDirectory(prefix="devenv-ctx-") as tmp:
@@ -167,7 +216,7 @@ def build_image(
         _copy_into(context_dir, staged)
         if Path(assets_dir).is_dir():
             _copy_into(assets_dir, staged)
-        cmd = ["docker", "build", "-t", image, str(staged)]
+        cmd = ["docker", "build", "-t", image, *build_args, str(staged)]
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:

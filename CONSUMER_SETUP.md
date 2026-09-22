@@ -45,7 +45,20 @@ Then:
 1. Fill in `devenv.toml` (name, `[services]`, versions). Add any project
    constants to `setup_common.py`.
 2. Write `docker-setup/Dockerfile` — the image `setup_wizard.py` builds and
-   `run_docker.py` runs (crib from an existing consumer).
+   `run_docker.py` runs (crib from an existing consumer). To include Claude
+   Code, add this near the end (after the slow apt/toolchain layers):
+
+   ```dockerfile
+   ARG CLAUDE_CODE_VERSION=latest
+   COPY install-claude.sh /tmp/
+   RUN /tmp/install-claude.sh "$CLAUDE_CODE_VERSION"
+   ```
+
+   Every build resolves `claude_code_version` from `devenv.toml` (default
+   `"latest"`; `"stable"` or an exact version like `"2.1.280"` also work) to
+   a concrete release and passes it as that build arg. A plain
+   `./build_docker_image.py` then picks up a new release while reusing every
+   layer above it; with no new release the build is fully cached.
 3. Add any project-specific steps (data downloads, credential templates, ...)
    to `setup_wizard.py`'s `SetupWizard` class, then run `./setup_wizard.py`.
    The scaffolded wizard already covers the generic steps: the workflow git
