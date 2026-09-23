@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build-time install of Claude Code into a system location.
 #
-# Consumers invoke this from their docker-setup/Dockerfile, as late as
-# possible so a version bump rebuilds only the layers after it:
+# Consumers invoke this as the last step of their docker-setup/Dockerfile,
+# so a version bump rebuilds nothing but this layer:
 #     ARG CLAUDE_CODE_VERSION=latest
 #     COPY install-claude.sh /tmp/
 #     RUN bash /tmp/install-claude.sh "$CLAUDE_CODE_VERSION"
