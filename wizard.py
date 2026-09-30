@@ -18,7 +18,7 @@ from typing import ClassVar
 import tomllib
 
 from . import github_access
-from .config import DevenvConfig
+from .config import DEVENV_UTILS_REPO_URL, DevenvConfig
 from .console import SetupException, print_green, print_red, print_rule, yes_no
 from .docker_ops import (
     MIN_DOCKER_VERSION,
@@ -161,7 +161,7 @@ class SetupWizardTool:
             print_green(f"devenv_utils working clone already present: {clone}")
         else:
             subprocess.run(
-                ["git", "clone", github_access.DEVENV_UTILS_REPO_URL, str(clone)], check=True
+                ["git", "clone", DEVENV_UTILS_REPO_URL, str(clone)], check=True
             )
         self._install_git_hooks(clone, tools_dir=".")
 

@@ -4,9 +4,9 @@
 git subtree records nothing about where a subtree came from, so the raw pull
 needs the prefix, URL, branch, and --squash spelled out every time. This wraps
 the routine case: each subtrees/<name>/ of the invoking repo is pulled from
-https://github.com/<owner>/<name>.git main, where <owner> comes from the
-repo's origin remote. Each pull lands as a squash + merge commit on the
-current branch; review and push as usual.
+main of the repo devenv.toml's [subtrees] table names for it (DevenvConfig
+.subtrees; devenv_utils needs no entry). Each pull lands as a squash + merge
+commit on the current branch; review and push as usual.
 
 For the non-routine case -- pulling from a working clone's branch to test a
 coordinated change -- use the raw command (see SUBTREES.md).
@@ -36,8 +36,8 @@ if __package__ in (None, ""):
 
 import subprocess
 
+from .config import load_config
 from .console import SetupException
-from .github_access import origin_repo
 
 SUBTREES_DIR = "subtrees"
 
@@ -76,10 +76,16 @@ def main():
     names = sorted(f[3].split("/")[-1] for f in fields if f[1] == "tree")
     if not names:
         sys.exit(f"No vendored subtrees under {toplevel / SUBTREES_DIR}; nothing to pull.")
-    owner = origin_repo(toplevel).split("/")[0]
+    sources = load_config(toplevel).subtrees
+    unknown = [n for n in names if n not in sources]
+    if unknown:
+        sys.exit(
+            f"No source repo for {', '.join(f'{SUBTREES_DIR}/{n}' for n in unknown)}; "
+            f"name it in devenv.toml's [subtrees] table (<name> = \"<git url>\")."
+        )
     for name in names:
         prefix = f"{SUBTREES_DIR}/{name}"
-        url = f"https://github.com/{owner}/{name}.git"
+        url = sources[name]
         print(f"Pulling {prefix} from {url} ...")
         subprocess.run(
             ["git", "subtree", "pull", "--prefix", prefix, url, "main", "--squash"],
