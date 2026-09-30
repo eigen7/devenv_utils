@@ -44,7 +44,13 @@ devenv_utils working clone; run it from the repo the change targets.
    PR. Launching it is the user's cost decision.
 6. Address review comments with follow-up commits — not squashes or
    force-pushes, which break the reviewer's "changes since last review" view.
-   A plain `git push` from the worktree updates the PR. Review comments are
+   A plain `git push` from the worktree updates the PR — while it is open.
+   The user may merge at any time, and a push to a merged PR's branch
+   succeeds but never reaches `main`. So check the PR's state right before
+   pushing (`gh pr view <branch> --json state`, or the REST API through
+   github_access.py); once it is merged, put the commit on a new branch from
+   `main` (`pr_flow.py worktree`, then `git cherry-pick`) as a new PR, and
+   tell the user the earlier one landed without it. Review comments are
    readable via the GitHub API (github_access.py) or `gh pr view --comments`
    where `gh` is installed.
 7. Once the user approves, they merge the PR on GitHub. Removing merged
