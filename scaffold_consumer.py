@@ -90,6 +90,11 @@ setup_version = "1.0.0"
 # Claude Code release for the image (see CONSUMER_SETUP.md): "latest",
 # "stable", or an exact version pin.
 # claude_code_version = "latest"
+
+# Vendored subtrees other than devenv_utils: subtrees/<name>/ -> the git URL
+# pull_subtrees.py pulls it from (see subtrees/devenv_utils/SUBTREES.md).
+# [subtrees]
+# mylib = "https://github.com/<owner>/mylib.git"
 """,
     "setup_common.py": '''\
 """Project-specific devenv configuration for THIS project.

@@ -18,9 +18,12 @@ here instead of restating the rules.
 subtrees/devenv_utils/pull_subtrees.py
 ```
 
-pulls every vendored subtree up to its upstream `main`. It wraps the raw
-form, needed only when pulling from somewhere other than upstream (see the
-coordinated-change recipe below):
+pulls every vendored subtree up to its upstream `main`. A subtree's upstream
+is the git URL named for it in `devenv.toml`'s `[subtrees]` table
+(`<name> = "<git url>"`); devenv_utils needs no entry, since its home is
+known, whoever owns the consumer. A subtree with no entry stops the pull with
+a message saying so. The script wraps the raw form, needed only when pulling
+from somewhere other than upstream (see the coordinated-change recipe below):
 
 ```bash
 git subtree pull --prefix subtrees/devenv_utils \
