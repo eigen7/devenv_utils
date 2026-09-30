@@ -29,8 +29,6 @@ from .config import DevenvConfig
 from .console import SetupException, print_green, print_red
 from .state import in_docker_container
 
-DEVENV_UTILS_REPO_URL = "https://github.com/eigen7/devenv_utils.git"
-
 HOST_TOKEN_PATH = Path.home() / ".devenv" / "github_token"
 CONTAINER_TOKEN_PATH = Path("/workspace/github-token")
 

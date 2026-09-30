@@ -15,6 +15,10 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Where devenv_utils itself is developed: the source of every consumer's
+# subtrees/devenv_utils/, and of the wizard's working clone.
+DEVENV_UTILS_REPO_URL = "https://github.com/eigen7/devenv_utils.git"
+
 # Service names and the project name become DNS labels (under `.localhost`) and
 # env-var suffixes, so they are restricted to lowercase letters, digits, and
 # hyphens, starting with a letter.
@@ -105,6 +109,12 @@ class DevenvConfig:
     # Build output directory removed by rm_target_on_major_bump() on a major
     # setup_version bump. Defaults to <repo_root>/target.
     target_dir: Path | None = None
+    # The [subtrees] table: each vendored subtree (subtrees/<name>/) -> the git
+    # URL of the repo it is pulled from (pull_subtrees.py). git subtree records
+    # no source, and a subtree's owner need not be the consumer's, so each is
+    # named here; devenv_utils, which every consumer vendors, is always known
+    # (DEVENV_UTILS_REPO_URL) unless overridden.
+    subtrees: dict[str, str] = field(default_factory=dict)
     # Directory holding the PR workflow's per-task git worktrees (pr_flow.py).
     # Defaults to <container_mount_path>/worktrees/<name>, so projects sharing
     # a mount cannot collide. Meaningful only inside the container, and only
@@ -135,6 +145,7 @@ class DevenvConfig:
             self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
+        self.subtrees = {"devenv_utils": DEVENV_UTILS_REPO_URL, **self.subtrees}
         self.services = {name: _coerce_service(v) for name, v in self.services.items()}
         if self.services:
             _validate_dns_label("project name", self.name)
