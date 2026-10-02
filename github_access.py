@@ -4,8 +4,9 @@ The user provisions a GitHub token once, through the wizard step
 `SetupWizardTool.setup_github_access()`; it is stored at ~/.devenv/github_token
 on the host and bind-mounted read-only into every dev container. Inside the
 container the entrypoint wires it into git (a credential helper for
-https://github.com) and into token-reading tools (GH_TOKEN), so pushing a
-branch and opening a PR need no further setup.
+https://github.com, and a rule keeping github.com on HTTPS against a host
+~/.gitconfig that rewrites it to SSH) and into token-reading tools (GH_TOKEN),
+so fetching, pushing a branch and opening a PR need no further setup.
 
 The step is optional: a user who only builds and runs the project can skip it.
 The container then launches without the token mount, and the PR-workflow tools
