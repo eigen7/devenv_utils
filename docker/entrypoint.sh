@@ -60,7 +60,9 @@ if [ -f /workspace/github-token ]; then
   # which GitHub does not know, so fetches fail while pushes (token, HTTPS) work.
   # Git applies the longest matching insteadOf and, between equal lengths, the
   # first one read; system config is read before global, so this identity rule
-  # wins without touching the host's file.
+  # wins without touching the host's file. The equal-length tie-break is git's
+  # behavior, not something its documentation promises: if fetches start
+  # failing over SSH again after a git upgrade, look here first.
   git config --system url."https://github.com/".insteadOf "https://github.com/"
 fi
 
