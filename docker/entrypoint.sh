@@ -54,6 +54,16 @@ if [ -f /workspace/github-token ]; then
     '!f() { echo "username=x-access-token"; echo "password=$(cat /workspace/github-token)"; }; f'
   echo 'export GH_TOKEN="$(cat /workspace/github-token)"' \
     > /etc/profile.d/github-token.sh
+  # Keep github.com on HTTPS, where the token authenticates. The host's
+  # ~/.gitconfig may rewrite https://github.com/ to SSH (url.<base>.insteadOf),
+  # which serves the host's own key; in here it would offer the container's key,
+  # which GitHub does not know, so fetches fail while pushes (token, HTTPS) work.
+  # Git applies the longest matching insteadOf and, between equal lengths, the
+  # first one read; system config is read before global, so this identity rule
+  # wins without touching the host's file. The equal-length tie-break is git's
+  # behavior, not something its documentation promises: if fetches start
+  # failing over SSH again after a git upgrade, look here first.
+  git config --system url."https://github.com/".insteadOf "https://github.com/"
 fi
 
 # Per-user dotfiles (idempotent), then exec the requested command as devuser.
