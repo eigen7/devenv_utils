@@ -21,7 +21,9 @@ devenv_utils working clone; run it from the repo the change targets.
    `/workspace/mount/worktrees/<project>/<branch>` on a new branch, with the
    `.env.json` setup stamp copied and a Claude commit identity so the PR
    distinguishes Claude's commits from the user's. Worktrees live under the
-   mount so in-progress work survives container relaunches.
+   mount so in-progress work survives container relaunches. Don't create
+   one with a bare `git worktree add`: it gets neither the stamp nor the
+   identity, so its commits go out under the user's name.
 2. Make the changes in the worktree, as atomic commits reviewable in
    isolation. For substantial work, the user may first ask for a plan
    review ([skills/plan-review/SKILL.md](skills/plan-review/SKILL.md)): a
@@ -36,6 +38,11 @@ devenv_utils working clone; run it from the repo the change targets.
 4. `pr_flow.py create <branch> --title ... --body-file ...` — pushes the
    branch to origin and opens its GitHub PR (or reports the one already
    open). It prints the review + merge handoff; relay that to the user.
+   To stack a PR on another unmerged one, pass the parent branch as
+   `--base` to both commands: `worktree` starts the branch from it, and
+   `create` opens the PR against it, so the diff shows only the child's
+   commits. Once the parent merges, the child's PR must target `main`;
+   if GitHub has not retargeted it, change its base on the PR page.
 5. Optionally — only when the user asks, or has made it their standing
    policy — run the shared `pr-review` skill
    ([skills/pr-review/SKILL.md](skills/pr-review/SKILL.md)): a bounded
