@@ -6,16 +6,17 @@ and merges there. Run this module directly from the repo it serves -- it reads
 that repo's devenv.toml (see config.load_config) -- so a task is these
 commands:
 
-  pr_flow.py worktree <branch>
-      New worktree at <worktrees_dir>/<branch> on a new branch <branch>, with
-      the primary checkout's .env.json setup stamp copied over and a Claude
-      commit identity, so the PR distinguishes Claude's commits from the
-      user's.
+  pr_flow.py worktree <branch> [--base <ref>]
+      New worktree at <worktrees_dir>/<branch> on a new branch <branch>
+      (started from <ref>, by default the primary checkout's HEAD), with the
+      primary checkout's .env.json setup stamp copied over and a Claude commit
+      identity, so the PR distinguishes Claude's commits from the user's.
 
-  pr_flow.py create <branch> --title ... [--body-file ... | --body ...]
-      Push the branch to origin and open its GitHub PR (or report the PR that
-      already exists for it -- follow-up pushes update an open PR by
-      themselves). Prints the review + merge handoff.
+  pr_flow.py create <branch> --title ... [--body-file ... | --body ...] [--base <branch>]
+      Push the branch to origin and open its GitHub PR against <base>
+      (default main; another feature branch stacks the PR on that one's), or
+      report the PR that already exists for it -- follow-up pushes update an
+      open PR by themselves. Prints the review + merge handoff.
 
   pr_flow.py cleanup
       Remove the worktrees and local branches of every branch whose PR has
@@ -146,7 +147,8 @@ def cmd_worktree(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
     path = cfg.worktrees_dir / args.branch
-    run(["git", "worktree", "add", str(path), "-b", args.branch], cwd=main)
+    start = [args.base] if args.base else []
+    run(["git", "worktree", "add", str(path), "-b", args.branch, *start], cwd=main)
     # Worktrees don't inherit the primary checkout's untracked setup stamp.
     copy_setup_state(main, cfg, path)
     run(["git", "config", "extensions.worktreeConfig", "true"], cwd=main)
@@ -167,8 +169,8 @@ def print_handoff(url: str):
 def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
     main = primary_worktree(cfg.repo_root)
     print(f"Primary checkout: {main}")
-    if not branch_adds_commits(main, args.branch):
-        print(f"Branch {args.branch} adds no commits over main; nothing to open.")
+    if not branch_adds_commits(main, args.branch, args.base):
+        print(f"Branch {args.branch} adds no commits over {args.base}; nothing to open.")
         print_stale_report(cfg)
         return
     slug = origin_repo(main)
@@ -179,7 +181,7 @@ def cmd_create(cfg: DevenvConfig, args: argparse.Namespace):
         print_handoff(existing["html_url"])
     else:
         body = Path(args.body_file).read_text() if args.body_file else args.body
-        pr = open_pr(slug, head=args.branch, base="main", title=args.title, body=body)
+        pr = open_pr(slug, head=args.branch, base=args.base, title=args.title, body=body)
         print_handoff(pr["html_url"])
     print_stale_report(cfg)
 
@@ -251,6 +253,7 @@ def parse_args() -> argparse.Namespace:
 
     p = sub.add_parser("worktree", help="create a worktree + branch with a Claude identity")
     p.add_argument("branch", help="branch (and worktree directory) name")
+    p.add_argument("--base", help="ref to start the branch from (default: the primary's HEAD)")
     p.set_defaults(func=cmd_worktree)
 
     p = sub.add_parser("create", help="push a branch to origin and open its GitHub PR")
@@ -259,6 +262,7 @@ def parse_args() -> argparse.Namespace:
     body = p.add_mutually_exclusive_group()
     body.add_argument("--body-file", help="file holding the PR description (markdown)")
     body.add_argument("--body", default="", help="inline PR description")
+    p.add_argument("--base", default="main", help="branch to merge into (default: main)")
     p.set_defaults(func=cmd_create)
 
     p = sub.add_parser("cleanup", help="remove worktrees + branches whose PRs have merged")
