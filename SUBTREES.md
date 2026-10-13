@@ -38,9 +38,11 @@ never gets in its way.
 
 ## Changing devenv_utils
 
-Changes are authored in the **working clone** at `<mount>/devenv_utils`
-(provisioned by the wizard's `setup_devenv_clone` step; inside the container,
-`/workspace/mount/devenv_utils`), never in a consumer's vendored copy. The
+Changes are authored in the **working clone** at
+`<project mount>/devenv_utils` (provisioned by the wizard's
+`setup_devenv_clone` step; inside the container,
+`$DEVENV_PROJECT_MOUNT/devenv_utils` -- see WORKFLOW.md), never in a
+consumer's vendored copy. The
 clone is a normal checkout of the devenv_utils repo, with the same
 worktree → PR workflow as any consumer (WORKFLOW.md): `./pr_flow.py worktree`,
 commit, `./pr_flow.py create`, review and merge on GitHub. Once the change is
@@ -56,7 +58,7 @@ merge, pull the subtree from the working clone's branch instead of upstream:
 
 ```bash
 git subtree pull --prefix subtrees/devenv_utils \
-    /workspace/mount/devenv_utils <branch> --squash
+    $DEVENV_PROJECT_MOUNT/devenv_utils <branch> --squash
 ```
 
 That squash commit carries the same tree the merged upstream `main` will, so

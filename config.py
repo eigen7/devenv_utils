@@ -10,10 +10,13 @@ point can construct the config from the file's location alone -- without
 importing any project Python.
 """
 
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .shared_mount import DEFAULT_SHARED_MOUNT_ROOT
 
 # Where devenv_utils itself is developed: the source of every consumer's
 # subtrees/devenv_utils/, and of the wizard's working clone.
@@ -68,8 +71,14 @@ class DevenvConfig:
     instance_name: str = ""
     # Hostname inside the container. Defaults to f"{name}-container".
     container_hostname: str = ""
-    # Suggested host mount dir during setup. Defaults to ~/<name>.
+    # Suggested host mount dir during setup. Defaults to ~/<name>, or to
+    # DEFAULT_SHARED_MOUNT_ROOT for a shared_mount project.
     default_mount_dir: Path | None = None
+    # Whether MOUNT_DIR is a shared root that a family of projects all mount
+    # whole at container_mount_path, each keeping its own data under
+    # <root>/<name> (see shared_mount.py). Off, MOUNT_DIR is this project's
+    # alone and is itself its data dir.
+    shared_mount: bool = False
 
     # Where the repo / mount dir are bind-mounted inside the container.
     # Set container_mount_path to None for projects that don't need a
@@ -116,9 +125,12 @@ class DevenvConfig:
     # (DEVENV_UTILS_REPO_URL) unless overridden.
     subtrees: dict[str, str] = field(default_factory=dict)
     # Directory holding the PR workflow's per-task git worktrees (pr_flow.py).
-    # Defaults to <container_mount_path>/worktrees/<name>, so projects sharing
-    # a mount cannot collide. Meaningful only inside the container, and only
-    # for projects with a mount dir.
+    # Defaults to <project mount>/worktrees/<name>, where the project mount is
+    # $DEVENV_PROJECT_MOUNT (set by run_container) or else
+    # project_mount_path. The env var places the worktrees of a repo with no
+    # container of its own -- the devenv_utils working clone -- under the
+    # data dir of whichever project's container it is used from. Meaningful
+    # only inside the container, and only for projects with a mount dir.
     worktrees_dir: Path | None = None
 
     def __post_init__(self):
@@ -130,7 +142,9 @@ class DevenvConfig:
         if not self.container_hostname:
             self.container_hostname = f"{self.name}-container"
         if self.default_mount_dir is None:
-            self.default_mount_dir = Path.home() / self.name
+            self.default_mount_dir = (
+                DEFAULT_SHARED_MOUNT_ROOT if self.shared_mount else Path.home() / self.name
+            )
         self.default_mount_dir = Path(self.default_mount_dir)
         if self.docker_context is None:
             self.docker_context = self.repo_root / "docker-setup"
@@ -142,7 +156,8 @@ class DevenvConfig:
             self.target_dir = self.repo_root / "target"
         self.target_dir = Path(self.target_dir)
         if self.worktrees_dir is None and self.container_mount_path is not None:
-            self.worktrees_dir = Path(self.container_mount_path) / "worktrees" / self.name
+            project_mount = os.environ.get("DEVENV_PROJECT_MOUNT") or self.project_mount_path
+            self.worktrees_dir = Path(project_mount) / "worktrees" / self.name
         if self.worktrees_dir is not None:
             self.worktrees_dir = Path(self.worktrees_dir)
         self.subtrees = {"devenv_utils": DEVENV_UTILS_REPO_URL, **self.subtrees}
@@ -151,6 +166,20 @@ class DevenvConfig:
             _validate_dns_label("project name", self.name)
             for service_name in self.services:
                 _validate_dns_label("service name", service_name)
+
+    @property
+    def project_mount_path(self) -> Path | None:
+        """This project's own data dir inside the container: its subdir of the
+        shared root, or the whole mount for a standalone project."""
+        if self.container_mount_path is None:
+            return None
+        return self.project_mount_dir(Path(self.container_mount_path))
+
+    def project_mount_dir(self, mount_dir: os.PathLike) -> Path:
+        """This project's own data dir, given the mount dir (MOUNT_DIR on the
+        host, container_mount_path inside the container)."""
+        mount_dir = Path(mount_dir)
+        return mount_dir / self.name if self.shared_mount else mount_dir
 
 
 # devenv.toml keys whose values are paths, resolved relative to the repo root.

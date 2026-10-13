@@ -77,6 +77,17 @@ Then:
    [skills/](skills/README.md) by adding a thin pointer skill per adopted
    skill to your `.claude/skills/` — see that README for the convention.
 
+## Sharing one mount across projects
+
+A family of projects that hand data to each other (one trains a model,
+another serves it) sets `shared_mount = true` in each `devenv.toml`. Their
+MOUNT_DIR is then one shared root (default `~/eigen7-mount`), bind-mounted
+whole at `/workspace/mount` in every container of the family; each project
+keeps its own data under `<root>/<name>/` and reads its siblings' at
+`/workspace/mount/<sibling>/`. The wizard migrates a project's earlier
+per-project mount into the root by moving it there whole. See
+[shared_mount.py](shared_mount.py).
+
 ## Parallel work and exposing dev servers
 
 Running several tasks at once does not need parallel containers: the PR
