@@ -68,7 +68,7 @@ updated by `git subtree pull` (see [SUBTREES.md](SUBTREES.md) for the full
 model). What the remaining symptoms mean:
 
 - **A commit is refused with "staged changes under subtrees/".** That's the
-  guard: edits go in the working clone at `<mount>/devenv_utils` and land
+  guard: edits go in the working clone at `<project mount>/devenv_utils` and land
   through a PR there, after which consumers pull the update. The refusal
   message says exactly this; `git commit --no-verify` bypasses deliberately.
 - **Pulling an update**: the `git subtree pull --squash` command in

@@ -17,13 +17,14 @@ from typing import ClassVar
 
 import tomllib
 
-from . import github_access
+from . import github_access, shared_mount
 from .config import DEVENV_UTILS_REPO_URL, DevenvConfig
 from .console import SetupException, print_green, print_red, print_rule, yes_no
 from .docker_ops import (
     MIN_DOCKER_VERSION,
     build_image,
     docker_server_version,
+    is_container_running,
     is_version_ok,
     major_version,
 )
@@ -45,36 +46,95 @@ class SetupWizardTool:
     # ---- Step: mount dir ------------------------------------------------
 
     def setup_mount_dir(self) -> Path:
+        """Choose the mount dir and record it in .env.json as MOUNT_DIR.
+
+        Returns, and keeps as self.mount_dir, the project's own data dir in
+        it: the mount dir itself, or <root>/<name> for a shared_mount project.
+        """
         c = self.config
         assert c.container_mount_path is not None, (
             f"{c.name} has no container_mount_path; skip the mount-dir step."
         )
+        mount_dir = self._choose_shared_root() if c.shared_mount else self._choose_own_mount()
+        update_env_json(c.env_json_path, {"MOUNT_DIR": str(mount_dir)})
+        print_green(f"Mount dir: {mount_dir}")
+        self.mount_dir = c.project_mount_dir(mount_dir)
+        self.mount_dir.mkdir(exist_ok=True)
+        return self.mount_dir
+
+    def _choose_own_mount(self) -> Path:
+        c = self.config
         print(f"{c.name} needs a persistent directory on the host that gets")
         print(f"bind-mounted into the Docker container at {c.container_mount_path}.")
         print("It holds data that must outlive any single container, and it MUST")
         print("live outside this repo.")
         print()
+        default = get_env_json(c.env_json_path).get("MOUNT_DIR", str(c.default_mount_dir))
+        return self._prompt_dir("Mount directory", default, _mkdir_problem)
 
-        env = get_env_json(c.env_json_path)
-        default = env.get("MOUNT_DIR", str(c.default_mount_dir))
+    def _choose_shared_root(self) -> Path:
+        """Choose the shared mount root, migrating a pre-shared MOUNT_DIR into it."""
+        c = self.config
+        recorded = get_env_json(c.env_json_path).get("MOUNT_DIR")
+        old = _premigration_mount(recorded)
+        print(f"{c.name} shares one persistent host directory -- the shared mount")
+        print("root -- with its sibling projects. Every container of the family")
+        print(f"bind-mounts it whole at {c.container_mount_path}, and each project keeps")
+        print(f"its own data in a subdirectory named after it (here, {c.name}/), so")
+        print("each can read what the others write. It MUST live outside this repo.")
+        print()
+        if old is not None:
+            print_red(f"Your mount dir {old} predates the shared mount layout and must")
+            print_red(f"be migrated: its contents move into <root>/{c.name}/.")
+            print()
+            self._require_container_stopped(old)
+        default = recorded if old is None and recorded else str(c.default_mount_dir)
+        root = self._prompt_dir(
+            "Shared mount root", default, lambda target: _shared_root_problem(target, old)
+        )
+        if not shared_mount.is_current(root):
+            shared_mount.init_root(root)
+        if old is not None:
+            self._migrate_mount(old, root)
+        return root
 
+    def _prompt_dir(self, label: str, default: str, problem) -> Path:
+        """Prompt until the user names a directory outside the repo for which
+        `problem(path)` returns None (else the reason it is unusable)."""
         while True:
-            ans = input(f"Mount directory [{default}]: ").strip() or default
-            target = os.path.abspath(os.path.expanduser(ans))
-            if is_subpath(target, c.repo_root):
-                print_red(f"Mount dir cannot live inside the repo ({c.repo_root}).")
+            ans = input(f"{label} [{default}]: ").strip() or default
+            target = Path(os.path.abspath(os.path.expanduser(ans)))
+            if is_subpath(target, self.config.repo_root):
+                print_red(f"{label} cannot live inside the repo ({self.config.repo_root}).")
                 continue
-            try:
-                os.makedirs(target, exist_ok=True)
-            except OSError as e:
-                print_red(f"Could not create {target}: {e}")
-                continue
-            break
+            reason = problem(target)
+            if reason is None:
+                return target
+            print_red(reason)
 
-        update_env_json(c.env_json_path, {"MOUNT_DIR": target})
-        print_green(f"Mount dir: {target}")
-        self.mount_dir = Path(target)
-        return self.mount_dir
+    def _require_container_stopped(self, old: Path):
+        name = self.config.instance_name
+        if is_container_running(name):
+            raise SetupException(
+                f"Container {name} is running with {old} mounted.",
+                "Exit it (or `docker stop` it), then re-run the wizard to migrate.",
+            )
+
+    def _migrate_mount(self, old: Path, root: Path):
+        """Move the pre-shared mount `old` whole into the project's dir under `root`."""
+        c = self.config
+        dest = c.project_mount_dir(root)
+        if not yes_no(f"Move {old} to {dest}?"):
+            raise SetupException("Mount migration declined; it is required to continue.")
+        move = shared_mount.MountMove(
+            host_old=str(old),
+            host_new=str(dest),
+            container_old=c.container_mount_path,
+            container_new=str(c.project_mount_path),
+        )
+        git_dirs = [_git_common_dir(c.repo_root), dest / "devenv_utils" / ".git"]
+        shared_mount.migrate_into(move, git_dirs)
+        print_green(f"Migrated {old} -> {dest}")
 
     # ---- Step: git config -----------------------------------------------
 
@@ -115,14 +175,7 @@ class SetupWizardTool:
         worktree whose vendored copy predates a given script must be
         tolerated: the hook no-ops when the script doesn't exist there.
         """
-        common_dir = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        hooks_dir = Path(common_dir) / "hooks"
+        hooks_dir = _git_common_dir(repo_root) / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         for name, entries in cls.GIT_HOOKS.items():
             lines = ["#!/bin/sh", 'top="$(git rev-parse --show-toplevel)"']
@@ -147,7 +200,7 @@ class SetupWizardTool:
     # ---- Step: devenv_utils working clone ------------------------------
 
     def setup_devenv_clone(self):
-        """Ensure the devenv_utils working clone at <mount>/devenv_utils.
+        """Ensure the devenv_utils working clone at <project mount>/devenv_utils.
 
         Consumers vendor devenv_utils as a read-only subtree; changes to it
         are authored in this clone and land through its own GitHub PRs (see
@@ -156,13 +209,11 @@ class SetupWizardTool:
         """
         mount_dir = get_env_json(self.config.env_json_path).get("MOUNT_DIR")
         assert mount_dir, "setup_devenv_clone requires setup_mount_dir to have run."
-        clone = Path(mount_dir) / "devenv_utils"
+        clone = self.config.project_mount_dir(mount_dir) / "devenv_utils"
         if clone.exists():
             print_green(f"devenv_utils working clone already present: {clone}")
         else:
-            subprocess.run(
-                ["git", "clone", DEVENV_UTILS_REPO_URL, str(clone)], check=True
-            )
+            subprocess.run(["git", "clone", DEVENV_UTILS_REPO_URL, str(clone)], check=True)
         self._install_git_hooks(clone, tools_dir=".")
 
     # ---- Step: gateway service -----------------------------------------
@@ -476,6 +527,51 @@ class SetupWizardTool:
 
     def rule(self):
         print_rule()
+
+
+def _git_common_dir(repo_root: Path) -> Path:
+    """The git dir shared by every worktree of the repo at `repo_root`."""
+    common_dir = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return Path(common_dir)
+
+
+def _mkdir_problem(target: Path) -> str | None:
+    """Create `target`, returning why that failed (None on success)."""
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return f"Could not create {target}: {e}"
+    return None
+
+
+def _premigration_mount(recorded: str | None) -> Path | None:
+    """The recorded MOUNT_DIR if it is a pre-shared mount needing migration,
+    else None (no mount recorded, nothing on disk, or already a shared root)."""
+    if not recorded or not Path(recorded).is_dir():
+        return None
+    version = shared_mount.read_version(Path(recorded))
+    if version == shared_mount.SHARED_MOUNT_VERSION:
+        return None
+    if version is not None:
+        raise SetupException(
+            f"{recorded} is a shared mount at layout version {version}; this wizard "
+            f"knows only version {shared_mount.SHARED_MOUNT_VERSION}."
+        )
+    return Path(recorded)
+
+
+def _shared_root_problem(target: Path, old: Path | None) -> str | None:
+    """Why `target` can't be the shared root, given the mount `old` being
+    migrated into it (if any); None if it can."""
+    if old is not None and is_subpath(target, old):
+        return f"The shared mount root cannot live inside {old}, the mount being migrated."
+    return shared_mount.root_problem(target)
 
 
 def check_setup_version(config: DevenvConfig) -> None:

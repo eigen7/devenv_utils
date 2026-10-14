@@ -348,7 +348,8 @@ def run_container(
 ):
     """`docker run` a fresh container for `config`, dropping into a shell.
 
-    Bind-mounts the repo (and the mount dir, if the project uses one) and passes
+    Bind-mounts the repo (and the mount dir, if the project uses one, naming
+    the project's own data dir in it as $DEVENV_PROJECT_MOUNT) and passes
     the host UID/GID plus the workspace path so the container's entrypoint can
     reconcile ownership and the per-user setup can cd correctly. `extra_args`
     (from the project's pre-launch hook, plus the service-wiring args) are
@@ -386,6 +387,7 @@ def run_container(
     if config.container_mount_path is not None:
         assert mount_dir, "mount_dir required when config has a mount path"
         cmd += ["-v", f"{mount_dir}:{config.container_mount_path}"]
+        cmd += ["-e", f"DEVENV_PROJECT_MOUNT={config.project_mount_path}"]
     cmd += _convenience_mounts()
     cmd += config.extra_docker_args
     if extra_args:

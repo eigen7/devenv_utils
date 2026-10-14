@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Callable
 
-from . import gateway_service, github_access
+from . import gateway_service, github_access, shared_mount
 from .config import DevenvConfig
 from .console import SetupException
 from .docker_ops import (
@@ -139,6 +139,10 @@ def _launch_fresh(
         assert not is_subpath(mount_dir, config.repo_root), (
             f"Mount dir {mount_dir} must not live inside repo {config.repo_root}"
         )
+        if config.shared_mount and not shared_mount.is_current(mount_dir):
+            print(f"Error: mount dir {mount_dir} is not a current shared mount root.")
+            print("Re-run ./setup_wizard.py to migrate it.")
+            sys.exit(1)
 
     extra_args = pre_launch(args) if pre_launch is not None else []
 
