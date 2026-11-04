@@ -25,9 +25,7 @@ own working clone).
 
 ## 1. Pin down the PR
 
-This session does not read the diff: the subagent in section 3 does, and the
-key's file:line references are what grading needs. Here, settle only what the
-subagent and the certificate depend on.
+Settle the following:
 
 **Head SHA.** Fetch it fresh even when this conversation already knows the PR,
 since `/pr-review` may have pushed fixes since: `gh pr view <url> --json
@@ -80,10 +78,11 @@ the tool, so quality pays here. Give it the PR URL, repo path, base and head
 SHA, the delta range if any, the attempt number, the concept tags missed in
 earlier attempts, the two output paths (`quiz.json` in the staging directory
 from section 4, and `attempt-N.key.json`), and the formats from the reference
-section below. It reads the diff and code itself. It writes both files and
-returns only a one-line summary (question count and how many are critical).
-Do not read the key file until grading: what you have not read, you cannot
-leak.
+section below. It reads the diff and code itself; this session does not need
+to, since grading works from the key's file:line references. It writes both
+files and returns only a one-line summary (question count and how many are
+critical). Do not read the key file until grading: what you have not read, you
+cannot leak.
 
 Question count scales with size and risk: 4 for small PRs, up to 8 for large
 ones.
