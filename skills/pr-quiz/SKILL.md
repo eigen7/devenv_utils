@@ -119,10 +119,13 @@ able to defend and evolve it, not only trace it.
 
 Design and problem questions are mostly open. Multiple choice suits behavior
 questions, and design questions whose alternatives are concrete. Its
-distractors must be plausible misreadings of the change, not throwaways; the
-page also asks for a one-sentence reason with every choice. Avoid questions
-answerable by elimination, and never let one question's wording give away
-another's answer: the user sees them all at once.
+distractors must be plausible misreadings of the change, not throwaways.
+Decide per question whether to also ask for a short reason: ask where a lucky
+guess is a real risk or the reasoning is the point, and skip it where the
+choice says everything. Word the prompt for that question ("Why not the
+alternatives?") without hinting at the answer. Avoid questions answerable by
+elimination, and never let one question's wording give away another's answer:
+the user sees them all at once.
 
 Quote code in a question's `code` field when the question is about specific
 lines; the user should not need to hunt for them.
@@ -180,7 +183,7 @@ brief explanation and references (file:line, or the commit or PR text a
 design answer rests on). For open questions, say which rubric points were hit
 or missed. A design answer whose reasoning differs from the key's is right if
 it is sound and covers the rubric's points. For multiple choice, a correct
-choice with a wrong reason is `partial`. "I don't know" and unanswered
+choice with a wrong reason, where one was asked for, is `partial`. "I don't know" and unanswered
 questions are `wrong`; never shame the user for them.
 
 **Verdict.** It is one of `pass`, `pass_with_notes` or `fail`:
@@ -267,7 +270,9 @@ recurring weak spots across transcripts.
 ## Reference: file formats
 
 `quiz.json` (written by the subagent; the page renders it). `kind` is
-`choice` or `open`; `code` is optional; `start` is the first line's number.
+`choice` or `open`; `code` is optional; `start` is the first line's number. On
+a choice question, `reason` is the prompt for a short reason; omit it to ask
+for none.
 
 ```json
 {
@@ -278,7 +283,7 @@ recurring weak spots across transcripts.
   "questions": [
     {"id": "q1", "kind": "choice", "prompt": "Markdown-lite: paragraphs, `code`, ``` fences.",
      "code": [{"path": "src/client.py", "start": 120, "text": "..."}],
-     "choices": ["...", "...", "..."]},
+     "choices": ["...", "...", "..."], "reason": "Why not the alternatives?"},
     {"id": "q2", "kind": "open", "prompt": "..."}
   ]
 }
