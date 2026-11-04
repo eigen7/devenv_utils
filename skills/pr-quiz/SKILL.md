@@ -71,11 +71,11 @@ the tool, so quality pays here. Give it the PR URL, repo path, base and head
 SHA, the delta range if any, the attempt number, the concept tags missed in
 earlier attempts, the two output paths (`quiz.json` in the staging directory
 from section 4, and `attempt-N.key.json`), and the formats from the reference
-section below. It reads the diff and code itself; this session does not need
-to, since grading works from the key's file:line references. It writes both
-files and returns only a one-line summary (question count and how many are
-critical). Do not read the key file until grading: what you have not read, you
-cannot leak.
+section below. It reads the PR description and comments, commit messages,
+diff and code itself; this session does not need to, since grading works from
+the key's references. It writes both files and returns only a one-line summary
+(question count and how many are critical). Do not read the key file until
+grading: what you have not read, you cannot leak.
 
 Question count scales with size and risk: 4 for small PRs, up to 8 for large
 ones.
@@ -89,33 +89,57 @@ generated or vendored code, and fixture data do not count. Relay the verdict
 quiz.
 
 **Tiers.** Tag every question:
-- `critical`: behavior, invariants, failure modes, concurrency, error
-  handling, data or API contract changes, rollback or blast radius. The risky
-  part of the change.
-- `supporting`: secondary paths, structure, naming that carries meaning, test
-  coverage.
+- `critical`: the problem the PR solves (for a fix, the bug and its root
+  cause), its central design decisions, and the risky part of the change:
+  behavior, invariants, failure modes, concurrency, error handling, data or
+  API contract changes, rollback or blast radius.
+- `supporting`: secondary decisions and paths, structure, naming that carries
+  meaning, test coverage.
 
 At least half the questions must be critical. Skip formatting, trivial
 renames, and trivia. Cover commits a review cycle pushed (e.g. `/pr-review`
 fixes): they are the code the user has seen least.
 
-**Types.** Mostly predict-the-behavior and trace-the-code questions with a
-verifiable answer ("Given input X, what does the new function return?", "What
-happens to in-flight requests when this changes?", "Which caller is affected
-by the changed precondition?"). Include 1 or 2 open questions ("What breaks
-first if assumption A is false?", "How would you roll this back?").
-Multiple-choice distractors must be plausible misreadings of the diff, not
-throwaways; the page also asks for a one-sentence reason with every choice.
-Avoid questions answerable by elimination, and never let one question's
-wording give away another's answer: the user sees them all at once.
+**Types.** Weight the quiz toward why over what. Owning a change means being
+able to defend and evolve it, not only trace it.
+- **Design**, the core of the quiz: why the change is built the way it is.
+  "Why is retry handled in the client rather than the transport?", "What
+  would go wrong if this used a lock instead of the queue?", "What does this
+  trade away, and when would that be the wrong trade?"
+- **The problem**: for a fix, the nature of the bug: its root cause, the
+  conditions that trigger it, and why the fix addresses the cause rather than
+  the symptom. For a feature, the need it meets and the constraints that
+  shaped it.
+- **Behavior**: a few predict-the-behavior or trace-the-code questions with a
+  verifiable answer ("Given input X, what does the new function return?",
+  "Which caller is affected by the changed precondition?"), enough to confirm
+  the user knows what the code actually does.
+- **Consequences**: "What breaks first if assumption A is false?", "How would
+  you roll this back?"
+
+Design and problem questions are mostly open. Multiple choice suits behavior
+questions, and design questions whose alternatives are concrete. Its
+distractors must be plausible misreadings of the change, not throwaways.
+Decide per question whether to also ask for a short reason: ask where a lucky
+guess is a real risk or the reasoning is the point, and skip it where the
+choice says everything. Word the prompt for that question ("Why not the
+alternatives?") without hinting at the answer. Avoid questions answerable by
+elimination, and never let one question's wording give away another's answer:
+the user sees them all at once.
 
 Quote code in a question's `code` field when the question is about specific
 lines; the user should not need to hunt for them.
 
-**Verification.** Each question's answer must be checked against the code.
-Where feasible, confirm by reading the actual implementation or running the
-test suite or a small snippet. If a question's answer cannot be established
-with confidence, drop it.
+**Verification.** Every answer in the key must be established, not assumed.
+Check behavior answers against the code: read the implementation, or run the
+tests or a small snippet. A design or problem answer must be on record (the
+PR description or comments, including a `/pr-review` summary, whose rebuttals
+are often design reasoning; commit messages; code comments; a linked issue)
+or demonstrable from the code ("B would break caller X"). Do not ask why the
+change took a path when the only answer is a guess at the author's intent.
+These questions often have more than one good answer, so their rubric lists
+the points that matter, not a required wording. If a question's answer cannot
+be established with confidence, drop it.
 
 ## 4. Administer the quiz in the browser
 
@@ -155,9 +179,11 @@ asks about the code, say it can wait until they submit.
 ## 5. Grade
 
 Read the key and grade every answer as `right`, `partial` or `wrong`, with a
-brief explanation and file:line references. For open questions, say which
-rubric points were hit or missed. For multiple choice, a correct choice whose
-reason misreads the code is `partial`. "I don't know" and unanswered
+brief explanation and references (file:line, or the commit or PR text a
+design answer rests on). For open questions, say which rubric points were hit
+or missed. A design answer whose reasoning differs from the key's is right if
+it is sound and covers the rubric's points. For multiple choice, a correct
+choice with a wrong reason, where one was asked for, is `partial`. "I don't know" and unanswered
 questions are `wrong`; never shame the user for them.
 
 **Verdict.** It is one of `pass`, `pass_with_notes` or `fail`:
@@ -244,7 +270,9 @@ recurring weak spots across transcripts.
 ## Reference: file formats
 
 `quiz.json` (written by the subagent; the page renders it). `kind` is
-`choice` or `open`; `code` is optional; `start` is the first line's number.
+`choice` or `open`; `code` is optional; `start` is the first line's number. On
+a choice question, `reason` is the prompt for a short reason; omit it to ask
+for none.
 
 ```json
 {
@@ -255,14 +283,15 @@ recurring weak spots across transcripts.
   "questions": [
     {"id": "q1", "kind": "choice", "prompt": "Markdown-lite: paragraphs, `code`, ``` fences.",
      "code": [{"path": "src/client.py", "start": 120, "text": "..."}],
-     "choices": ["...", "...", "..."]},
+     "choices": ["...", "...", "..."], "reason": "Why not the alternatives?"},
     {"id": "q2", "kind": "open", "prompt": "..."}
   ]
 }
 ```
 
 `attempt-N.key.json` (written by the subagent; never published). For choice
-questions `answer` is the letter.
+questions `answer` is the letter. `refs` point at code, or at the commit or PR
+text a design answer rests on.
 
 ```json
 {"q1": {"tier": "critical", "tag": "retry-backoff", "answer": "B",

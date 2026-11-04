@@ -245,7 +245,7 @@ textarea:disabled { opacity: 0.55; }
   function isAnswered(q) {
     const d = state.draft[q.id] || {};
     if (d.dont_know) return true;
-    if (q.kind === "choice") return Number.isInteger(d.choice) && (d.reason || "").trim() !== "";
+    if (q.kind === "choice") return Number.isInteger(d.choice) && (!q.reason || (d.reason || "").trim() !== "");
     return (d.text || "").trim() !== "";
   }
 
@@ -298,10 +298,11 @@ textarea:disabled { opacity: 0.55; }
           <input type="radio" name="${esc(q.id)}" id="${esc(q.id)}-c${i}" value="${i}" ${d.choice === i ? "checked" : ""} ${off}>
           <span class="letter">${letter(i)}</span><span class="text">${inline(c)}</span>
         </label>`).join("");
-      body = `<div class="choices">${opts}</div>
-        <label class="field" for="${esc(q.id)}-reason">Why? One sentence, pointing at the code.
+      // The quiz asks for a reason only where it supplies the prompt for one.
+      const reason = q.reason ? `<label class="field" for="${esc(q.id)}-reason">${inline(q.reason)}
           <textarea id="${esc(q.id)}-reason" data-q="${esc(q.id)}" data-field="reason" rows="2" ${off}>${esc(d.reason)}</textarea>
-        </label>`;
+        </label>` : "";
+      body = `<div class="choices">${opts}</div>${reason}`;
     } else {
       body = `<label class="field" for="${esc(q.id)}-text">Your answer
           <textarea id="${esc(q.id)}-text" data-q="${esc(q.id)}" data-field="text" rows="5" ${off}>${esc(d.text)}</textarea>
@@ -320,8 +321,8 @@ textarea:disabled { opacity: 0.55; }
           <input type="radio" disabled ${letter(i) === a.choice ? "checked" : ""} aria-label="Choice ${letter(i)}">
           <span class="letter">${letter(i)}</span><span class="text">${inline(c)}</span>
         </div>`).join("");
-      return `<div class="choices">${opts}</div>
-        <div class="answer-read"><span class="label">Your reason</span><p>${esc(a.reason)}</p></div>`;
+      const reason = a.reason ? `<div class="answer-read"><span class="label">Your reason</span><p>${esc(a.reason)}</p></div>` : "";
+      return `<div class="choices">${opts}</div>${reason}`;
     }
     return `<div class="answer-read"><span class="label">Your answer</span><p>${esc(a.text)}</p></div>`;
   }
@@ -471,7 +472,7 @@ textarea:disabled { opacity: 0.55; }
       for (const q of state.quiz.questions) {
         const d = state.draft[q.id] || {};
         if (d.dont_know || !isAnswered(q)) answers[q.id] = { dont_know: true };
-        else if (q.kind === "choice") answers[q.id] = { choice: letter(d.choice), reason: d.reason.trim() };
+        else if (q.kind === "choice") answers[q.id] = { choice: letter(d.choice), ...(q.reason && { reason: d.reason.trim() }) };
         else answers[q.id] = { text: d.text.trim() };
       }
       const doc = { attempt: state.quiz.attempt, head_sha: state.quiz.head_sha, submitted_at: new Date().toISOString(), answers };
