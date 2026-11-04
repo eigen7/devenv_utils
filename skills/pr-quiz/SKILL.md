@@ -39,13 +39,6 @@ unpushed or uncommitted, stop and say so, since the certificate would describe
 code that is not on the PR. Never switch the user's branch; the subagent reads
 files at the head SHA with `git show <sha>:<path>`.
 
-**Size check**, from `git diff --numstat origin/<base>...<head_sha>` rather than
-the diff itself: if the PR is too large to quiz meaningfully (roughly more than
-1,500 changed lines, not counting lockfiles, generated or vendored code, and
-snapshot or fixture data; or many unrelated concerns, judged from the file
-list), stop and say so. Verdict: "Too big to own as one unit. Consider
-splitting," with a suggested split. Do not quiz.
-
 ## 2. Find prior attempts
 
 Attempts live in `<main>/.pr-quiz/<owner>-<repo>/pr-<number>/`, where `<main>`
@@ -86,6 +79,14 @@ cannot leak.
 
 Question count scales with size and risk: 4 for small PRs, up to 8 for large
 ones.
+
+**Too big to own.** A pass must mean the user understands the whole change. If
+8 questions cannot cover it, because it is too large or bundles unrelated
+concerns, the subagent writes no files and returns that verdict with a
+suggested split instead of its summary. Size means substance: lockfiles,
+generated or vendored code, and fixture data do not count. Relay the verdict
+("Too big to own as one unit. Consider splitting," with the split) and do not
+quiz.
 
 **Tiers.** Tag every question:
 - `critical`: behavior, invariants, failure modes, concurrency, error
