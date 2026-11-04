@@ -299,7 +299,7 @@ textarea:disabled { opacity: 0.55; }
           <span class="letter">${letter(i)}</span><span class="text">${inline(c)}</span>
         </label>`).join("");
       body = `<div class="choices">${opts}</div>
-        <label class="field" for="${esc(q.id)}-reason">Why? One sentence, pointing at the code.
+        <label class="field" for="${esc(q.id)}-reason">Why? One sentence.
           <textarea id="${esc(q.id)}-reason" data-q="${esc(q.id)}" data-field="reason" rows="2" ${off}>${esc(d.reason)}</textarea>
         </label>`;
     } else {
