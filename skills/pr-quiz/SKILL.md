@@ -5,8 +5,9 @@ description: Quiz the user on a GitHub pull request, answered in the browser, to
 
 # pr-quiz
 
-Usage: `/pr-quiz [<github-pr-url>]`. Without a URL, quiz the PR for the
-current branch (`gh pr view --json url`, or `github_access.py`'s
+Usage: `/pr-quiz [<github-pr-url>]`. Without a URL, quiz the PR this
+conversation has been about (e.g. the one `/pr-review` just ran on), else the
+PR for the current branch (`gh pr view --json url`, or `github_access.py`'s
 `find_open_pr()` where `gh` is not installed).
 
 Purpose: passing this quiz is the user's certificate that they understand a PR
@@ -22,37 +23,41 @@ Paths below are relative to the devenv_utils directory this skill lives under
 (`subtrees/devenv_utils/` in a consumer repo; the repo root in devenv_utils'
 own working clone).
 
-## 1. Fetch the PR
+## 1. Pin down the PR
 
-Get the metadata with `gh pr view <url> --json
-title,body,headRefOid,baseRefName,headRefName,files,additions,deletions`, or,
-where `gh` is not installed, `github_access.py`'s `api("GET",
-"/repos/<slug>/pulls/<number>")` (`head.sha`, `base.ref`, ...). Record the head
-SHA. Take the diff from local git (`git fetch origin`, then `git diff
-origin/<base>...<head_sha>`) or `gh pr diff <url>`.
+This session does not read the diff: the subagent in section 3 does, and the
+key's file:line references are what grading needs. Here, settle only what the
+subagent and the certificate depend on.
+
+**Head SHA.** Fetch it fresh even when this conversation already knows the PR,
+since `/pr-review` may have pushed fixes since: `gh pr view <url> --json
+headRefOid,baseRefName,title`, or, where `gh` is not installed,
+`github_access.py`'s `api("GET", "/repos/<slug>/pulls/<number>")` (`head.sha`,
+`base.ref`, `title`). Then `git fetch origin`.
 
 **The quiz covers what is pushed.** If the current checkout is the PR's branch,
-`HEAD` must equal the head SHA and the tree must be clean. This matters most
-right after `/pr-review`, which may have just committed fixes: if anything is
+`HEAD` must equal the head SHA and the tree must be clean. If anything is
 unpushed or uncommitted, stop and say so, since the certificate would describe
-code that is not on the PR. If the checkout is on another branch, read files at
-the head SHA with `git show <sha>:<path>` rather than switching the user's
-branch.
+code that is not on the PR. Never switch the user's branch; the subagent reads
+files at the head SHA with `git show <sha>:<path>`.
 
-**Size check:** if the PR is too large to quiz meaningfully (roughly more than
+**Size check**, from `git diff --numstat origin/<base>...<head_sha>` rather than
+the diff itself: if the PR is too large to quiz meaningfully (roughly more than
 1,500 changed lines, not counting lockfiles, generated or vendored code, and
-snapshot or fixture data; or many unrelated concerns), stop and say so.
-Verdict: "Too big to own as one unit. Consider splitting," with a suggested
-split. Do not quiz.
+snapshot or fixture data; or many unrelated concerns, judged from the file
+list), stop and say so. Verdict: "Too big to own as one unit. Consider
+splitting," with a suggested split. Do not quiz.
 
 ## 2. Find prior attempts
 
 Attempts live in `<main>/.pr-quiz/<owner>-<repo>/pr-<number>/`, where `<main>`
 is the main checkout: `dirname "$(git rev-parse --path-format=absolute
 --git-common-dir)"`. Never put them in a PR worktree; `pr_flow.py cleanup`
-deletes it after the merge, certificate included. The first time, append
-`.pr-quiz/` to `$(git rev-parse --git-common-dir)/info/exclude` unless that
-file or `.gitignore` already covers it. (In a worktree `.git` is a file, so
+deletes it after the merge, certificate included. devenv_utils and the repos
+`scaffold_consumer.py` sets up ignore `.pr-quiz/` in `.gitignore`. In any
+other repo, check with `git check-ignore -q .pr-quiz/`, and if it is not
+ignored, append `.pr-quiz/` to `$(git rev-parse --git-common-dir)/info/exclude`
+rather than editing a tracked file. (In a worktree `.git` is a file, so
 `.git/info/exclude` does not exist.)
 
 Each attempt N has `attempt-N.md` (the transcript, section 7) and
