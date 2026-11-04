@@ -36,6 +36,11 @@ That writes:
 | `build_docker_image.py` | builds the local Docker image from `docker-setup/` |
 | `run_docker.py` | launches (or attaches to) the dev container |
 
+It also appends devenv_utils' entries to `.gitignore` (currently `.pr-quiz/`,
+for the `pr-quiz` skill's transcripts). An already-scaffolded repo picks up
+entries added later by re-running the script, which skips every file that
+exists.
+
 The PR-workflow tools need no per-project shim: run them straight from the
 subtree (`subtrees/devenv_utils/pr_flow.py`, `stale_worktrees.py`) — each
 reads the invoking repo's `devenv.toml` itself.

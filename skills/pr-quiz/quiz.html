@@ -1,0 +1,485 @@
+<title>PR quiz</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap">
+<style>
+/* Layout: one exam column; each question is a numbered sheet, the verdict sits above them once graded. */
+:root {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --fg: #1a2130;
+  --muted: #586274;
+  --line: #d6dce5;
+  --accent: #2753c0;
+  --accent-fg: #ffffff;
+  --code-bg: #edf0f5;
+  --right: #1d7547;
+  --right-bg: #e3f3ea;
+  --partial: #94600a;
+  --partial-bg: #fbf0d9;
+  --wrong: #b02a21;
+  --wrong-bg: #fbe5e3;
+  --font-ui: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --font-prose: "Literata", Georgia, "Times New Roman", serif;
+  --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10141b; --surface: #171c25; --fg: #e2e6ed; --muted: #98a2b3; --line: #2a3240;
+    --accent: #86a6ff; --accent-fg: #0c1322; --code-bg: #0c1017;
+    --right: #63c992; --right-bg: #15291f; --partial: #e2a944; --partial-bg: #2c2312;
+    --wrong: #ff7d73; --wrong-bg: #331816; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10141b; --surface: #171c25; --fg: #e2e6ed; --muted: #98a2b3; --line: #2a3240;
+  --accent: #86a6ff; --accent-fg: #0c1322; --code-bg: #0c1017;
+  --right: #63c992; --right-bg: #15291f; --partial: #e2a944; --partial-bg: #2c2312;
+  --wrong: #ff7d73; --wrong-bg: #331816; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+}
+.page {
+  max-width: 780px; margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 20px;
+}
+a { color: var(--accent); }
+code, pre, .mono { font-family: var(--font-code); font-size: 0.86em; }
+:not(pre) > code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
+pre {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; margin: 0; overflow-x: auto; line-height: 1.45;
+}
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+header { display: flex; flex-direction: column; gap: 6px; }
+.eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+h1 {
+  font-family: var(--font-prose); font-weight: 600; font-size: 1.7rem; line-height: 1.25;
+  margin: 0; text-wrap: balance;
+}
+.meta { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 14px; }
+.sha { font-family: var(--font-code); font-size: 13px; color: var(--fg); }
+
+.notice {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.notice p { margin: 0; }
+.notice.waiting { border-color: var(--accent); }
+
+.verdict { border-radius: 8px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border: 1px solid; }
+.verdict.pass { background: var(--right-bg); border-color: var(--right); }
+.verdict.pass_with_notes { background: var(--partial-bg); border-color: var(--partial); }
+.verdict.fail { background: var(--wrong-bg); border-color: var(--wrong); }
+.verdict h2 { margin: 0; font-family: var(--font-prose); font-size: 1.35rem; }
+.verdict.pass h2 { color: var(--right); }
+.verdict.pass_with_notes h2 { color: var(--partial); }
+.verdict.fail h2 { color: var(--wrong); }
+.verdict ul { margin: 0; padding-left: 1.2em; }
+.verdict .sub { font-size: 14px; color: var(--muted); }
+
+ol.questions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.q {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0;
+}
+.q-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.q-num { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.prose { font-family: var(--font-prose); font-size: 1.04rem; line-height: 1.6; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.prose p { margin: 0; }
+.snippet { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.snippet-path { font-family: var(--font-code); font-size: 12px; color: var(--muted); }
+.snippet pre { counter-reset: line var(--start); }
+.snippet pre span.ln { display: block; }
+.snippet pre span.ln::before {
+  counter-increment: line; content: counter(line);
+  display: inline-block; width: 3.2em; margin-right: 1em; text-align: right; color: var(--muted); user-select: none;
+}
+
+.choices { display: flex; flex-direction: column; gap: 8px; }
+.choice {
+  display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: start;
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; cursor: pointer;
+}
+.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.choice input { margin: 3px 0 0; accent-color: var(--accent); }
+.choice .letter { font-weight: 700; color: var(--muted); }
+.choice .text { min-width: 0; }
+.choice.locked { cursor: default; }
+.choice.mine { border-color: var(--fg); }
+
+label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
+textarea {
+  font: inherit; font-size: 15px; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; resize: vertical; width: 100%;
+}
+textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+textarea:disabled { opacity: 0.55; }
+
+.q-tools { display: flex; justify-content: flex-end; }
+.toggle {
+  background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 999px;
+  padding: 4px 12px; font-size: 13px; cursor: pointer;
+}
+.toggle[aria-pressed="true"] { border-color: var(--fg); color: var(--fg); font-weight: 700; }
+
+.answer-read { border-left: 3px solid var(--line); padding-left: 12px; display: flex; flex-direction: column; gap: 4px; }
+.answer-read .label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.answer-read p { margin: 0; white-space: pre-wrap; }
+
+.chip { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.chip.right { background: var(--right-bg); color: var(--right); }
+.chip.partial { background: var(--partial-bg); color: var(--partial); }
+.chip.wrong { background: var(--wrong-bg); color: var(--wrong); }
+
+.grading { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.refs { display: flex; flex-wrap: wrap; gap: 6px; }
+.refs span { font-family: var(--font-code); font-size: 12px; background: var(--code-bg); border-radius: 4px; padding: 2px 6px; }
+
+.bar {
+  position: sticky; bottom: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 16px; margin-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+}
+.bar .status { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.bar .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  border-radius: 6px; padding: 8px 16px; cursor: pointer; font-weight: 700;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg);
+}
+.btn.secondary { background: none; color: var(--fg); border-color: var(--line); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.fallback textarea { font-family: var(--font-code); font-size: 12px; min-height: 140px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .choice, .toggle, textarea { transition: border-color 120ms, box-shadow 120ms; }
+}
+</style>
+
+<main class="page" id="app">
+  <header>
+    <div class="eyebrow">PR quiz</div>
+    <h1>Loading the quiz…</h1>
+  </header>
+</main>
+
+<script>
+(() => {
+  const app = document.getElementById("app");
+  const use = (name) => (window.claude && window.claude.use ? window.claude.use(name) : Promise.resolve(null));
+  const artifactP = use("artifact");
+  const commentsP = use("comments");
+
+  const state = {
+    quiz: null, answers: null, results: null,
+    draft: {},
+    confirming: false, saving: false, error: null, fallback: null,
+    notified: null, // null: not tried; true: Claude was sent a comment; false: it could not be
+  };
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+  // Paragraphs, inline `code` and ``` fenced blocks: enough for questions and explanations.
+  function md(text) {
+    const parts = String(text ?? "").split(/```[^\n]*\n?/);
+    return parts.map((part, i) => {
+      if (i % 2) return `<pre><code>${esc(part.replace(/\n$/, ""))}</code></pre>`;
+      return part.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${inline(p)}</p>`).join("");
+    }).join("");
+  }
+  const letter = (i) => String.fromCharCode(65 + i);
+
+  async function getJSON(path) {
+    try {
+      const r = await fetch(path, { cache: "no-store" });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  }
+
+  const draftKey = () => `pr-quiz:${state.quiz.pr.url}:${state.quiz.attempt}:${state.quiz.head_sha}`;
+  function loadDraft() {
+    try { state.draft = JSON.parse(localStorage.getItem(draftKey())) || {}; } catch { state.draft = {}; }
+  }
+  function storeDraft() {
+    try { localStorage.setItem(draftKey(), JSON.stringify(state.draft)); } catch {}
+  }
+
+  // The answers file must belong to the attempt this page is showing.
+  const sameAttempt = (doc) => doc && doc.attempt === state.quiz.attempt && doc.head_sha === state.quiz.head_sha;
+
+  async function load() {
+    const quiz = await getJSON("quiz.json");
+    if (!quiz) {
+      app.innerHTML = `<header><div class="eyebrow">PR quiz</div><h1>No quiz here yet</h1></header>
+        <div class="notice"><p>This page couldn't load <code>quiz.json</code>. Ask the Claude session to publish the quiz again.</p></div>`;
+      return;
+    }
+    state.quiz = quiz;
+    const [answers, results] = await Promise.all([getJSON("answers.json"), getJSON("results.json")]);
+    state.answers = sameAttempt(answers) ? answers : null;
+    state.results = sameAttempt(results) ? results : null;
+    loadDraft();
+    render();
+  }
+
+  function phase() {
+    if (state.results) return "graded";
+    if (state.answers) return "submitted";
+    return "open";
+  }
+
+  function isAnswered(q) {
+    const d = state.draft[q.id] || {};
+    if (d.dont_know) return true;
+    if (q.kind === "choice") return Number.isInteger(d.choice) && (d.reason || "").trim() !== "";
+    return (d.text || "").trim() !== "";
+  }
+
+  function renderHeader() {
+    const q = state.quiz;
+    const delta = q.delta_from ? ` · changes since <span class="sha">${esc(q.delta_from.slice(0, 7))}</span>` : "";
+    return `<header>
+      <div class="eyebrow">PR quiz · attempt ${esc(q.attempt)}</div>
+      <h1>${inline(q.pr.title)}</h1>
+      <div class="meta">
+        <a href="${esc(q.pr.url)}" target="_blank" rel="noopener">${esc(q.pr.repo)}#${esc(q.pr.number)}</a>
+        <span>head <span class="sha">${esc(q.head_sha.slice(0, 10))}</span>${delta}</span>
+        <span>${q.questions.length} questions</span>
+      </div>
+    </header>`;
+  }
+
+  function renderVerdict() {
+    const r = state.results;
+    const label = { pass: "Passed", pass_with_notes: "Passed, with notes", fail: "Not passed" }[r.verdict] || r.verdict;
+    const notes = (r.notes || []).length ? `<ul>${r.notes.map((n) => `<li>${inline(n)}</li>`).join("")}</ul>` : "";
+    const sub = r.verdict === "fail"
+      ? "Reread the areas below, then ask the Claude session for a re-quiz. It will use fresh questions."
+      : `Covers head ${esc(state.quiz.head_sha.slice(0, 10))}. New commits to the PR need a quiz on the changes.`;
+    return `<section class="verdict ${esc(r.verdict)}" aria-live="polite">
+      <h2>${esc(label)}</h2>
+      <div class="prose">${md(r.rationale)}</div>
+      ${notes}
+      <div class="sub">${sub}</div>
+      <div class="sub">Disagree with anything here? Talk it through in the Claude session. If it changes its mind, this page updates.</div>
+    </section>`;
+  }
+
+  function renderSnippets(q) {
+    return (q.code || []).map((c) => {
+      const lines = String(c.text).replace(/\n$/, "").split("\n").map((l) => `<span class="ln">${esc(l) || " "}</span>`).join("");
+      return `<div class="snippet">
+        <div class="snippet-path">${esc(c.path)}${c.start ? `:${esc(c.start)}` : ""}</div>
+        <pre style="--start:${Math.max(0, (Number(c.start) || 1) - 1)}"><code>${lines}</code></pre>
+      </div>`;
+    }).join("");
+  }
+
+  function renderOpenAnswer(q) {
+    const d = state.draft[q.id] || {};
+    const off = d.dont_know ? "disabled" : "";
+    let body;
+    if (q.kind === "choice") {
+      const opts = q.choices.map((c, i) => `<label class="choice">
+          <input type="radio" name="${esc(q.id)}" id="${esc(q.id)}-c${i}" value="${i}" ${d.choice === i ? "checked" : ""} ${off}>
+          <span class="letter">${letter(i)}</span><span class="text">${inline(c)}</span>
+        </label>`).join("");
+      body = `<div class="choices">${opts}</div>
+        <label class="field" for="${esc(q.id)}-reason">Why? One sentence, pointing at the code.
+          <textarea id="${esc(q.id)}-reason" data-q="${esc(q.id)}" data-field="reason" rows="2" ${off}>${esc(d.reason)}</textarea>
+        </label>`;
+    } else {
+      body = `<label class="field" for="${esc(q.id)}-text">Your answer
+          <textarea id="${esc(q.id)}-text" data-q="${esc(q.id)}" data-field="text" rows="5" ${off}>${esc(d.text)}</textarea>
+        </label>`;
+    }
+    return `${body}<div class="q-tools">
+      <button type="button" class="toggle" data-dont-know="${esc(q.id)}" aria-pressed="${d.dont_know ? "true" : "false"}">I don't know</button>
+    </div>`;
+  }
+
+  function renderGivenAnswer(q) {
+    const a = state.answers.answers[q.id] || {};
+    if (a.dont_know) return `<div class="answer-read"><span class="label">Your answer</span><p>I don't know</p></div>`;
+    if (q.kind === "choice") {
+      const opts = q.choices.map((c, i) => `<div class="choice locked ${letter(i) === a.choice ? "mine" : ""}">
+          <input type="radio" disabled ${letter(i) === a.choice ? "checked" : ""} aria-label="Choice ${letter(i)}">
+          <span class="letter">${letter(i)}</span><span class="text">${inline(c)}</span>
+        </div>`).join("");
+      return `<div class="choices">${opts}</div>
+        <div class="answer-read"><span class="label">Your reason</span><p>${esc(a.reason)}</p></div>`;
+    }
+    return `<div class="answer-read"><span class="label">Your answer</span><p>${esc(a.text)}</p></div>`;
+  }
+
+  function renderGrading(q) {
+    const g = state.results.questions?.[q.id];
+    if (!g) return "";
+    const refs = (g.refs || []).length ? `<div class="refs">${g.refs.map((r) => `<span>${esc(r)}</span>`).join("")}</div>` : "";
+    return `<div class="grading">
+      <div class="prose">${md(g.explanation)}</div>
+      ${refs}
+    </div>`;
+  }
+
+  function renderQuestion(q, i) {
+    const p = phase();
+    const g = p === "graded" ? state.results.questions?.[q.id] : null;
+    const chip = g ? `<span class="chip ${esc(g.result)}">${esc(g.result)}</span>` : "";
+    return `<li class="q" id="${esc(q.id)}">
+      <div class="q-head"><span class="q-num">Question ${i + 1} of ${state.quiz.questions.length}</span>${chip}</div>
+      <div class="prose">${md(q.prompt)}</div>
+      ${renderSnippets(q)}
+      ${p === "open" ? renderOpenAnswer(q) : renderGivenAnswer(q)}
+      ${g ? renderGrading(q) : ""}
+    </li>`;
+  }
+
+  function renderBar() {
+    const p = phase();
+    if (state.fallback) {
+      return `<section class="notice fallback">
+        <p><strong>This view can't save to the quiz page.</strong> Copy this and paste it into the Claude session instead.</p>
+        <textarea id="fallback-json" readonly>${esc(state.fallback)}</textarea>
+        <div><button type="button" class="btn secondary" data-action="copy">Copy</button></div>
+      </section>`;
+    }
+    const err = state.error ? `<span class="status" role="alert">${esc(state.error)}</span>` : "";
+    if (p === "open") {
+      const total = state.quiz.questions.length;
+      const done = state.quiz.questions.filter(isAnswered).length;
+      const status = state.confirming
+        ? (done < total ? `${total - done} unanswered. They will be graded wrong.` : "Answers can't be changed after you submit.")
+        : `${done} of ${total} answered`;
+      const actions = state.confirming
+        ? `<button type="button" class="btn secondary" data-action="cancel">Keep editing</button>
+           <button type="button" class="btn" data-action="submit" ${state.saving ? "disabled" : ""}>${state.saving ? "Submitting…" : "Submit for grading"}</button>`
+        : `<button type="button" class="btn" data-action="confirm">Submit</button>`;
+      return `<div class="bar"><span class="status">${status}</span>${err}<div class="actions">${actions}</div></div>`;
+    }
+    if (p === "submitted") {
+      const told = state.notified === false
+        ? "<p>This page couldn't notify the Claude session. Tell it in the terminal that you submitted.</p>"
+        : "<p>This page reloads with your results. If nothing happens within a couple of minutes, tell the Claude session in the terminal.</p>";
+      return `<section class="notice waiting" aria-live="polite"><p><strong>Submitted. Waiting for grading.</strong></p>${told}</section>`;
+    }
+    return "";
+  }
+
+  function render() {
+    const focused = document.activeElement && document.activeElement.id;
+    const p = phase();
+    app.innerHTML = `${renderHeader()}
+      ${p === "graded" ? renderVerdict() : ""}
+      <ol class="questions">${state.quiz.questions.map(renderQuestion).join("")}</ol>
+      ${renderBar()}`;
+    if (focused) document.getElementById(focused)?.focus();
+  }
+
+  // Re-render only the bar while typing, so the textarea keeps its caret.
+  function renderBarOnly() {
+    const old = app.querySelector(".bar, .notice.fallback, .notice.waiting");
+    const html = renderBar();
+    if (old) old.outerHTML = html || "";
+    else if (html) app.insertAdjacentHTML("beforeend", html);
+  }
+
+  // A page's own save starts no Claude turn; a comment sent to Claude does.
+  // Must start within the click that triggered it, so it runs alongside the save.
+  async function notifyClaude(text) {
+    const comments = await commentsP;
+    try {
+      if (!comments || (await comments.canSendToClaude()) !== "available") return false;
+      const anchor = await comments.anchorFor(app.querySelector("h1"));
+      await comments.sendToClaude({ anchor, text });
+      return true;
+    } catch { return false; }
+  }
+
+  async function save(name, doc, note) {
+    state.saving = true; state.error = null; render();
+    const json = JSON.stringify(doc, null, 2);
+    const artifact = await artifactP;
+    if (!artifact) { state.saving = false; state.fallback = json; render(); return false; }
+    let notified = null;
+    for (let tries = 0; tries < 2; tries++) {
+      try {
+        notified ||= notifyClaude(note);
+        await artifact.publish({ [name]: { content: json, contentType: "application/json" } });
+        state.saving = false;
+        notified.then((ok) => { state.notified = ok; render(); });
+        return true;
+      } catch (e) {
+        const code = e && e.code;
+        if (code === "conflict") { state.saving = false; state.error = "The quiz changed underneath you. Reloading."; render(); return false; }
+        if (code === "rate_limited") { state.saving = false; state.error = "Saving too often. Wait a few seconds and try again."; render(); return false; }
+        if (["not_writer", "not_granted", "not_declared", "capability_disabled", "capability_removed", "consent_required"].includes(code)) break;
+        if (tries === 0) { await new Promise((r) => setTimeout(r, 800 + Math.random() * 800)); continue; }
+      }
+    }
+    state.saving = false; state.fallback = json; render();
+    return false;
+  }
+
+  app.addEventListener("input", (e) => {
+    const t = e.target;
+    if (t.dataset.q) {
+      (state.draft[t.dataset.q] ||= {})[t.dataset.field] = t.value;
+      storeDraft(); renderBarOnly();
+    }
+  });
+
+  app.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.type === "radio" && phase() === "open") {
+      (state.draft[t.name] ||= {}).choice = Number(t.value);
+      storeDraft(); renderBarOnly();
+    }
+  });
+
+  app.addEventListener("click", async (e) => {
+    const dk = e.target.closest("[data-dont-know]");
+    if (dk) {
+      const d = (state.draft[dk.dataset.dontKnow] ||= {});
+      d.dont_know = !d.dont_know;
+      storeDraft(); render();
+      return;
+    }
+    const action = e.target.closest("[data-action]")?.dataset.action;
+    if (action === "confirm") { state.confirming = true; render(); }
+    if (action === "cancel") { state.confirming = false; render(); }
+    if (action === "copy") {
+      const box = document.getElementById("fallback-json");
+      try { await navigator.clipboard.writeText(box.value); } catch { box.select(); }
+    }
+    if (action === "submit") {
+      const answers = {};
+      for (const q of state.quiz.questions) {
+        const d = state.draft[q.id] || {};
+        if (d.dont_know || !isAnswered(q)) answers[q.id] = { dont_know: true };
+        else if (q.kind === "choice") answers[q.id] = { choice: letter(d.choice), reason: d.reason.trim() };
+        else answers[q.id] = { text: d.text.trim() };
+      }
+      const doc = { attempt: state.quiz.attempt, head_sha: state.quiz.head_sha, submitted_at: new Date().toISOString(), answers };
+      const note = `pr-quiz: answers submitted for attempt ${doc.attempt}. Read answers.json and grade.`;
+      if (await save("answers.json", doc, note)) { state.answers = doc; state.confirming = false; render(); }
+    }
+  });
+
+  load();
+})();
+</script>

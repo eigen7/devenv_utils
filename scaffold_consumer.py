@@ -18,6 +18,11 @@ It writes the generic glue (never overwriting an existing file):
     build_docker_image.py     builds the local Docker image
     run_docker.py             launches (or attaches to) the dev container
 
+and adds any missing devenv_utils entries to .gitignore (currently .pr-quiz/,
+the pr-quiz skill's transcripts). That step is the one that edits an existing
+file, so re-running the script on an already-scaffolded repo is how it picks
+up entries added later.
+
 The PR-workflow tools need no per-project shim: run them straight from the
 subtree (subtrees/devenv_utils/pr_flow.py, stale_worktrees.py) -- each reads
 the invoking repo's devenv.toml itself.
@@ -295,6 +300,24 @@ if __name__ == "__main__":
 # Entry points meant to be run as ./<script>; chmod'd executable when written.
 _EXECUTABLE = {"setup_wizard.py", "build_docker_image.py", "run_docker.py"}
 
+# Local state devenv_utils tools write into the consumer's checkout.
+_GITIGNORE = [
+    ".pr-quiz/",  # pr-quiz skill transcripts and answer keys (skills/pr-quiz)
+]
+
+
+def _ensure_gitignored() -> list[str]:
+    """Append the _GITIGNORE entries .gitignore lacks; return those added."""
+    path = REPO_ROOT / ".gitignore"
+    text = path.read_text() if path.exists() else ""
+    present = {line.strip() for line in text.splitlines()}
+    missing = [entry for entry in _GITIGNORE if entry not in present]
+    if missing:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        path.write_text(text + "".join(f"{entry}\n" for entry in missing))
+    return missing
+
 
 def main() -> int:
     wrote, skipped = [], []
@@ -313,6 +336,8 @@ def main() -> int:
         print(f"  wrote    {rel}")
     for rel in skipped:
         print(f"  skipped  {rel}  (already exists)")
+    for entry in _ensure_gitignored():
+        print(f"  ignored  {entry}  (added to .gitignore)")
 
     print("\nNext steps:")
     print("  1. Fill in devenv.toml (project name, ports, versions).")
